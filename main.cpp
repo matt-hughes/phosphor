@@ -9,6 +9,8 @@
 
 //#define FULLSCREEN
 
+#define BLANK_CHAR  0x20
+
 GLuint program;
 GLuint vao;
 
@@ -199,9 +201,10 @@ void SetupGlyph(Vertex* vertexBuf, Font* font, int charIdx, float x, float y, fl
     const float th = (1.0f / font->nRows);
     const float tx = col * tw;
     const float ty = row * th;
-    const float pi = 0.002f;
-    const float ti = 0.002f;
-    SetupQuad(vertexBuf, x+pi, y+pi, w-pi*2, h-pi*2, tx+ti, ty+ti, tw-ti*2, th-ti*2);
+    const float pi = 0.00f;
+    const float tix = 16.f/17;
+    const float tiy = 24.f/25;
+    SetupQuad(vertexBuf, x+pi, y+pi, w-pi*2, h-pi*2, tx, ty, tw*tix, th*tiy);
 }
 
 void SetupString(Vertex* vertexBuf, Font* font, int* charIndices, int nCols, int nRows, float x, float y, float w, float h)
@@ -508,7 +511,7 @@ int main()
     {
         for(int c = 0; c < cols; c++)
         {
-            charIndices[r][c] = 0x7F;
+            charIndices[r][c] = BLANK_CHAR;
         }
     }
 
@@ -578,7 +581,7 @@ int main()
     CHECK_GL_CALL( GLuint texColor = glGetUniformLocation(program, "color") );
 
     Font font;
-    if(!LoadFont(&font, "PetASCII3.tga", 16, 16))
+    if(!LoadFont(&font, "PetASCII4.tga", 16, 16))
     {
         printf("Failed to load font file!\n");
         exit(1);
@@ -603,6 +606,7 @@ int main()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
     CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, font.tga.imageWidth, font.tga.imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, font.tga.imageData) );
+    //CHECK_GL_CALL( glGenerateMipmap(GL_TEXTURE_2D) );
 
     GLuint bgTexID;
     CHECK_GL_CALL( glGenTextures(1, &bgTexID) );
@@ -708,7 +712,7 @@ int main()
             }
             for(int c = 0; c < cols; c++)
             {
-                charIndices[rows-1][c] = 0x7F;
+                charIndices[rows-1][c] = BLANK_CHAR;
             }
             cursor = 0;
         }
