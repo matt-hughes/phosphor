@@ -430,6 +430,111 @@ void renderTarget_finalize(renderTarget* r)
     glGenerateMipmap(GL_TEXTURE_2D);
 }
 
+void clearChars(int* charIndices, int rows, int cols, int ch)
+{
+    int total = rows * cols;
+    while(total--)
+    {
+        *charIndices++ = ch;
+    }
+}
+
+void updateChars(int* charIndices, int rows, int cols)
+{
+#define CHAR_AT(_r,_c) charIndices[(_r)*cols+(_c)]
+    static int mode = 0;
+    static int charSetLimit = 64;
+    static int cursor = 0;
+    static int tick = 0;
+
+    ++tick;
+
+#if 1
+    if(rand()%100 == 0)
+    {
+        clearChars(charIndices, rows, cols, BLANK_CHAR);
+    }
+    else
+    {
+        static int cur_r = 0;
+        static int cur_c = 0;
+        for(int n = 0; n < 10; n++)
+        {
+            cur_c = (cur_c+rand()%3-1)%cols;
+            cur_r = (cur_r+rand()%3-1)%rows;
+            CHAR_AT(cur_r,cur_c) = (CHAR_AT(cur_r,cur_c)+rand()%5) % 0x100;
+        }
+        // for(int r = 0; r < rows; r++)
+        // {
+        //     for(int c = 0; c < cols; c++)
+        //     {
+        //         //CHAR_AT(r,c) = (CHAR_AT(r,c)+(rand()&rand())%2) % 0x100;
+        //         //CHAR_AT(r,c) = (unsigned int)((sinf((tick+r)*0.1f)*cosf(tick+c)*0.5+0.5)*((c+1)*10))&0xFF;
+        //     }
+        // }
+    }
+    return;
+#endif
+
+    if(rand()%10 == 0) mode = rand()%10;
+
+    if(rand()%20 == 0) charSetLimit = 32+(rand()%(256-32));
+
+    
+    if(mode == 0)
+    {
+        for(int cc = 0; cc < 1; cc++)
+        {
+            CHAR_AT(rows-1, cursor % cols) = rand() % charSetLimit;
+            cursor += 1;
+            if(cursor >= cols)
+            {
+                mode = 2;
+                break;
+            }
+        }   
+    }
+    else if(mode == 1)
+    {
+
+        for(int nn = 0; nn < 10; nn++)
+        {
+            int dx = 0;
+            int dy = 0;
+            switch(rand() % 4)
+            {
+                case 0: dx = -1; break;
+                case 1: dy = -1; break;
+                case 2: dx = 1; break;
+                case 3: dy = 1; break;
+            }
+            unsigned int x1 = rand() % cols;
+            unsigned int y1 = rand() % rows;
+            unsigned int x2 = (x1+dx) % cols;
+            unsigned int y2 = (y1+dy) % rows;
+            unsigned int tmp = CHAR_AT(y2, x2);
+            CHAR_AT(y2, x2) = CHAR_AT(y1, x1);
+            CHAR_AT(y1, x1) = tmp;
+        }
+    }
+    else if(mode == 2)
+    {
+        mode = 0;
+        for(int r = 0; r < rows-1; r++)
+        {
+            for(int c = 0; c < cols; c++)
+            {
+                CHAR_AT(r,c) = CHAR_AT(r+1,c);
+            }
+        }
+        for(int c = 0; c < cols; c++)
+        {
+            CHAR_AT(rows-1,c) = BLANK_CHAR;
+        }
+        cursor = 0;
+    }
+}
+
 int main()
 {
   // Initialize GLFW, and if it fails to initialize for any reason, print it out to STDERR.
@@ -638,7 +743,7 @@ int main()
     glEnable(GL_BLEND);
 
     int frameIdx = 0;
-    int cursor = 0;
+    
     while(!glfwWindowShouldClose(window))
     {
         gTime = (frameIdx * 1./60);
@@ -656,66 +761,7 @@ int main()
         //   charIndices[(frameIdx/cols)%rows][frameIdx%cols] = rand()%64;
         // }
 
-        static int mode = 0;
-        static int charSetLimit = 64;
-
-        if(rand()%10 == 0) mode = rand()%10;
-
-        if(rand()%20 == 0) charSetLimit = 32+(rand()%(256-32));
-
-        
-        if(mode == 0)
-        {
-            for(int cc = 0; cc < 1; cc++)
-            {
-                charIndices[rows-1][cursor % cols] = rand() % charSetLimit;
-                cursor += 1;
-                if(cursor >= cols)
-                {
-                    mode = 2;
-                    break;
-                }
-            }   
-        }
-        else if(mode == 1)
-        {
-
-            for(int nn = 0; nn < 10; nn++)
-            {
-                int dx = 0;
-                int dy = 0;
-                switch(rand() % 4)
-                {
-                    case 0: dx = -1; break;
-                    case 1: dy = -1; break;
-                    case 2: dx = 1; break;
-                    case 3: dy = 1; break;
-                }
-                unsigned int x1 = rand() % cols;
-                unsigned int y1 = rand() % rows;
-                unsigned int x2 = (x1+dx) % cols;
-                unsigned int y2 = (y1+dy) % rows;
-                unsigned int tmp = charIndices[y2][x2];
-                charIndices[y2][x2] = charIndices[y1][x1];
-                charIndices[y1][x1] = tmp;
-            }
-        }
-        else if(mode == 2)
-        {
-            mode = 0;
-            for(int r = 0; r < rows-1; r++)
-            {
-                for(int c = 0; c < cols; c++)
-                {
-                    charIndices[r][c] = charIndices[r+1][c];
-                }
-            }
-            for(int c = 0; c < cols; c++)
-            {
-                charIndices[rows-1][c] = BLANK_CHAR;
-            }
-            cursor = 0;
-        }
+        updateChars(&charIndices[0][0], rows, cols);
 
         /////////
 
@@ -742,7 +788,7 @@ int main()
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        const float flickerA = 0.92f+0.08f*sinf(gTime*100.0f);
+        const float flickerA = 0.94f+0.06f*sinf(gTime*100.0f);
 
 
         {
@@ -804,11 +850,14 @@ int main()
         //glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         //glClear(GL_COLOR_BUFFER_BIT);
 
+        float bgBrightness = 1.16f;
         float brightness = 0.95f;
+        float largeGlowAmt = 0.2f;
+        float smallGlowAmt = 0.1f;
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.7f) );
+        CHECK_GL_CALL( glUniform4f(texColor, bgBrightness, bgBrightness, bgBrightness, 0.7f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, bgTexID) );
@@ -824,7 +873,7 @@ int main()
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * 0.1f) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * smallGlowAmt) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
@@ -832,7 +881,7 @@ int main()
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * 0.2f) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * largeGlowAmt) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer3.tex) );
