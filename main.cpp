@@ -11,9 +11,6 @@
 
 #define BLANK_CHAR  0x20
 
-GLuint program;
-GLuint vao;
-
 #define CHECK_ERROR() { GLint err = glGetError(); if(err != GL_NO_ERROR) { printf("Error %d at %s:%d\n", err, __FILE__, __LINE__); exit(1); } }
 #define CHECK_GL_CALL(expr) expr; CHECK_ERROR()
 
@@ -226,7 +223,7 @@ void warp(float& x, float& y)
     float oy = y;
     //float d = sqrtf(ox*ox+oy*oy);
     float d = (ox*ox*oy*oy);
-    const float warpAmt = 0.03f;
+    const float warpAmt = 0.04f;
     x = ox + ox * d * -warpAmt;
     y = oy + oy * d * -warpAmt;
 }
@@ -297,7 +294,7 @@ void screenGrid_update(screenGrid* g, Vertex* vertexBuf, float ox, float oy, flo
             const Vertex& jit = g->jitterVector[y*g->width+x];
             Vertex& dyn = g->dynamicPoints[y*g->width+x];
 
-            float jitAmt = sinf(y*4. + gTime*15.) * 0.5f + (rand()%10)*0.5f;
+            float jitAmt = sinf(y*4. + gTime*15.) * 0.5f + (rand()%100)*0.035f;
 
             dyn.x = ox + (orig.x + jit.x * jitAmt) * w;
             dyn.y = oy + (orig.y + jit.y * jitAmt) * h;
@@ -439,6 +436,40 @@ void clearChars(int* charIndices, int rows, int cols, int ch)
     }
 }
 
+#define _CH(c,r) ((c)+(r)*16)
+
+const int kLineChars[] = {
+    _CH(0,4),
+    _CH(2,4),
+    _CH(3,4),
+    _CH(4,4),
+    _CH(5,4),
+    _CH(6,4),
+    _CH(7,4),
+    _CH(8,4),
+    _CH(12,4),
+    _CH(15,4),
+    _CH(0,5),
+    _CH(2,5),
+    _CH(4,5),
+    _CH(9,5),
+    _CH(11,5),
+    _CH(13,5),
+    _CH(3,6),
+    _CH(4,6),
+    _CH(5,6),
+    _CH(7,6),
+    _CH(11,6),
+    _CH(13,6),
+    _CH(14,6),
+    _CH(0,7),
+    _CH(1,7),
+    _CH(2,7),
+    _CH(3,7),
+    _CH(10,7),
+    _CH(13,7),
+};
+
 void updateChars(int* charIndices, int rows, int cols)
 {
 #define CHAR_AT(_r,_c) charIndices[(_r)*cols+(_c)]
@@ -450,11 +481,11 @@ void updateChars(int* charIndices, int rows, int cols)
     ++tick;
 
 #if 1
-    if(rand()%100 == 0)
+    if(rand()%300 == 0)
     {
         clearChars(charIndices, rows, cols, BLANK_CHAR);
     }
-    else
+    else if(rand()%1 == 0)
     {
         static int cur_r = 0;
         static int cur_c = 0;
@@ -462,13 +493,26 @@ void updateChars(int* charIndices, int rows, int cols)
         {
             cur_c = (cur_c+rand()%3-1)%cols;
             cur_r = (cur_r+rand()%3-1)%rows;
-            CHAR_AT(cur_r,cur_c) = (CHAR_AT(cur_r,cur_c)+rand()%5) % 0x100;
+            //CHAR_AT(cur_r,cur_c) = (CHAR_AT(cur_r,cur_c)+rand()%5) % 0x100;
+            CHAR_AT(cur_r,cur_c) = kLineChars[rand()%(sizeof(kLineChars)/sizeof(kLineChars[0]))];
+        }
+        for(int n = 0; n < 1000; n++)
+        {
+            int rc = rand() % cols;
+            int rr = rand() % (rows-1);
+            int above = CHAR_AT(rr,rc);
+            int below = CHAR_AT(rr+1,rc);
+            if(below == BLANK_CHAR)
+            {
+                CHAR_AT(rr+1,rc) = above;
+                CHAR_AT(rr,rc) = below;
+            }
         }
         // for(int r = 0; r < rows; r++)
         // {
         //     for(int c = 0; c < cols; c++)
         //     {
-        //         //CHAR_AT(r,c) = (CHAR_AT(r,c)+(rand()&rand())%2) % 0x100;
+        //         //CHAR_AT(r,c) = kLineChars[rand()%(sizeof(kLineChars)/sizeof(kLineChars[0]))];
         //         //CHAR_AT(r,c) = (unsigned int)((sinf((tick+r)*0.1f)*cosf(tick+c)*0.5+0.5)*((c+1)*10))&0xFF;
         //     }
         // }
@@ -476,7 +520,7 @@ void updateChars(int* charIndices, int rows, int cols)
     return;
 #endif
 
-    if(rand()%10 == 0) mode = rand()%10;
+    if(rand()%10 == 0) mode = rand()%6;
 
     if(rand()%20 == 0) charSetLimit = 32+(rand()%(256-32));
 
@@ -603,8 +647,12 @@ int main()
         //SHADER_LINE( "#version 110 core" )
         SHADER_LINE( "uniform sampler2D tex;" )
         SHADER_LINE( "uniform vec4 color;" )
+        SHADER_LINE( "uniform float ghostDist;" )
+        SHADER_LINE( "uniform float ghostAmt;" )
         SHADER_LINE( "void main(void) {" )
-        SHADER_LINE( "    gl_FragColor = texture2D(tex, gl_TexCoord[0].xy) * color;" )
+        SHADER_LINE( "    vec4 s1 = texture2D(tex, gl_TexCoord[0].xy);" )
+        SHADER_LINE( "    vec4 s2 = texture2D(tex, gl_TexCoord[0].xy + vec2(-ghostDist,0.0));" )
+        SHADER_LINE( "    gl_FragColor = (s1 + s2*ghostAmt) * color;" )
         //SHADER_LINE( "    gl_FragColor = vec4(1,1,1,1);" )
         SHADER_LINE( "}" )
     };
@@ -625,7 +673,7 @@ int main()
     //     //2, 3, 0
     // };
 
-    CHECK_GL_CALL( program = glCreateProgram() );
+    CHECK_GL_CALL( GLuint normalShader = glCreateProgram() );
 
     CHECK_GL_CALL( GLuint fs = glCreateShader(GL_FRAGMENT_SHADER) );
     CHECK_GL_CALL( glShaderSource(fs, 1, fs_source, NULL) );
@@ -637,14 +685,14 @@ int main()
     glCompileShader(vs);
     CHECK_SHADER_ERROR(vs);
 
-    CHECK_GL_CALL( glAttachShader(program, vs) );
-    CHECK_GL_CALL( glAttachShader(program, fs) );
+    CHECK_GL_CALL( glAttachShader(normalShader, vs) );
+    CHECK_GL_CALL( glAttachShader(normalShader, fs) );
 
-    glLinkProgram(program);
-    CHECK_LINK_ERROR(program);
+    glLinkProgram(normalShader);
+    CHECK_LINK_ERROR(normalShader);
 
-    CHECK_GL_CALL( GLuint positionSlot = glGetAttribLocation(program, "Position") );
-    CHECK_GL_CALL( GLuint texCoordSlot = glGetAttribLocation(program, "TexCoord") );
+    CHECK_GL_CALL( GLuint positionSlot = glGetAttribLocation(normalShader, "Position") );
+    CHECK_GL_CALL( GLuint texCoordSlot = glGetAttribLocation(normalShader, "TexCoord") );
 
     CHECK_GL_CALL( glEnableVertexAttribArray(positionSlot) );
     CHECK_GL_CALL( glEnableVertexAttribArray(texCoordSlot) );
@@ -675,18 +723,20 @@ int main()
     CHECK_GL_CALL( glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer) );
     CHECK_GL_CALL( glBufferData(GL_ARRAY_BUFFER, sizeof(vertexBuf), vertexBuf, GL_DYNAMIC_DRAW) );
 
-    CHECK_GL_CALL( glUseProgram(program) );
+    CHECK_GL_CALL( glUseProgram(normalShader) );
 
     CHECK_GL_CALL( glVertexAttribPointer(positionSlot, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,x)) );
     CHECK_GL_CALL( glVertexAttribPointer(texCoordSlot, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,tx)) );
 
-    CHECK_GL_CALL( GLuint texLoc = glGetUniformLocation(program, "tex") );
+    CHECK_GL_CALL( GLuint texLoc = glGetUniformLocation(normalShader, "tex") );
     CHECK_GL_CALL( glUniform1i(texLoc, 0) );
 
-    CHECK_GL_CALL( GLuint texColor = glGetUniformLocation(program, "color") );
+    CHECK_GL_CALL( GLuint texColor = glGetUniformLocation(normalShader, "color") );
+    CHECK_GL_CALL( GLuint texGhostDist = glGetUniformLocation(normalShader, "ghostDist") );
+    CHECK_GL_CALL( GLuint texGhostAmt = glGetUniformLocation(normalShader, "ghostAmt") );
 
     Font font;
-    if(!LoadFont(&font, "PetASCII4.tga", 16, 16))
+    if(!LoadFont(&font, "PetASCII4_mono.tga", 16, 16))
     {
         printf("Failed to load font file!\n");
         exit(1);
@@ -765,6 +815,13 @@ int main()
 
         /////////
 
+        static float driftGhost = 0.0f;
+        driftGhost += (((float)(rand()%100)/100.f) - driftGhost) * 0.3f;
+        CHECK_GL_CALL( glUniform1f(texGhostDist, 0.002f + 0.002f * driftGhost) );
+        CHECK_GL_CALL( glUniform1f(texGhostAmt, 0.1f) );
+
+        /////////
+
         renderTarget_bind(&virtScreen);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -788,7 +845,17 @@ int main()
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        const float flickerA = 0.94f+0.06f*sinf(gTime*100.0f);
+        const float flickerA = 0.93f+0.07f*sinf(gTime*100.0f);
+
+#if 1
+        const float fontColorR = 0.3f;
+        const float fontColorG = 1.0f;
+        const float fontColorB = 0.3f;
+#else
+        const float fontColorR = 0.7f;
+        const float fontColorG = 0.8f;
+        const float fontColorB = 1.0f;
+#endif
 
 
         {
@@ -800,7 +867,7 @@ int main()
             //SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
             screenGrid_update(&grid, vertexBuf, sqX, sqY, sqW, sqH, 0, 0, 1, 1);
             CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-            CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 1.f) );
+            CHECK_GL_CALL( glUniform4f(texColor, fontColorR, fontColorG, fontColorB, 1.f) );
             CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
             CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
             CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, virtScreen.tex) );
@@ -850,8 +917,8 @@ int main()
         //glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         //glClear(GL_COLOR_BUFFER_BIT);
 
-        float bgBrightness = 1.16f;
-        float brightness = 0.95f;
+        float bgBrightness = 1.115f;
+        float brightness = 0.90f;
         float largeGlowAmt = 0.2f;
         float smallGlowAmt = 0.1f;
 
@@ -894,9 +961,6 @@ int main()
 
         ++frameIdx;
     }
-
-    glDeleteVertexArrays(1, &vao);
-    glDeleteProgram(program);
 
     return 0;
 }
