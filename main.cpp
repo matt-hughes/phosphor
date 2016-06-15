@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cmath>
 
-#define FULLSCREEN
+//#define FULLSCREEN
 
 GLuint program;
 GLuint vao;
@@ -294,6 +294,62 @@ void myGlfwKeyCB(GLFWwindow* window, int key, int scancode, int action, int mods
     }
 }
 
+typedef struct
+{
+    GLuint fbo;
+    GLuint tex;
+    GLuint width;
+    GLuint height;
+} renderTarget;
+
+void renderTarget_initScreen(renderTarget* r, GLuint width, GLuint height)
+{
+    r->width = width;
+    r->height = height;
+
+    r->fbo = 0;
+    r->tex = 0;
+
+    CHECK_GL_CALL( glBindFramebuffer(GL_FRAMEBUFFER, 0) );
+}
+
+void renderTarget_initFBO(renderTarget* r, GLuint width, GLuint height)
+{
+    r->width = width;
+    r->height = height;
+
+    CHECK_GL_CALL( glGenFramebuffers(1, &r->fbo) );
+    CHECK_GL_CALL( glBindFramebuffer(GL_FRAMEBUFFER, r->fbo) );
+
+    CHECK_GL_CALL( glGenTextures(1, &r->tex) );
+    CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, r->tex) );
+    CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, 0) );
+    CHECK_GL_CALL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR) );
+    CHECK_GL_CALL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST) );
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    CHECK_GL_CALL( glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, r->tex, 0) );
+    GLenum drawBufs[1] = {GL_COLOR_ATTACHMENT0};
+    CHECK_GL_CALL( glDrawBuffers(1, drawBufs) );
+    if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    {
+        printf("Failed to setup render buffer\n");
+        exit(1);
+    }
+}
+
+void renderTarget_bind(renderTarget* r)
+{
+    CHECK_GL_CALL( glBindFramebuffer(GL_FRAMEBUFFER, r->fbo) );
+    glViewport(0, 0, r->width, r->height);
+}
+
+void renderTarget_finalize(renderTarget* r)
+{
+    CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, r->tex) );
+    glGenerateMipmap(GL_TEXTURE_2D);
+}
+
 int main()
 {
   // Initialize GLFW, and if it fails to initialize for any reason, print it out to STDERR.
@@ -446,12 +502,14 @@ int main()
 
     CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
 
-    GLuint texName;
-    CHECK_GL_CALL( glGenTextures(1, &texName) );
-    CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, texName) );
+    GLuint fontTex;
+    CHECK_GL_CALL( glGenTextures(1, &fontTex) );
+    CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
     CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, font.tga.imageWidth, font.tga.imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, font.tga.imageData) );
 
@@ -461,34 +519,23 @@ int main()
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
     CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, bgTga.imageWidth, bgTga.imageHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, bgTga.imageData) );
 
-    GLuint FramebufferName = 0;
-    CHECK_GL_CALL( glGenFramebuffers(1, &FramebufferName) );
-    CHECK_GL_CALL( glBindFramebuffer(GL_FRAMEBUFFER, FramebufferName) );
+    renderTarget screen;
+    renderTarget virtScreen;
+    renderTarget phosphorLayer;
+    renderTarget phosphorLayer2;
+    renderTarget phosphorLayer3;
 
-    GLuint renderedTexture;
-    CHECK_GL_CALL( glGenTextures(1, &renderedTexture) );
-    CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, renderedTexture) );
-    CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, virtScreenW, virtScreenH, 0, GL_RGB, GL_UNSIGNED_BYTE, 0) );
-    CHECK_GL_CALL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR) );
-    CHECK_GL_CALL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR) );
-    CHECK_GL_CALL( glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, renderedTexture, 0) );
-    GLenum DrawBuffers[1] = {GL_COLOR_ATTACHMENT0};
-    CHECK_GL_CALL( glDrawBuffers(1, DrawBuffers) );
-    if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-    {
-        printf("Failed to setup render buffer\n");
-        exit(1);
-    }
+    renderTarget_initScreen(&screen, screenW, screenH);
+    renderTarget_initFBO(&virtScreen, virtScreenW, virtScreenH);
+    renderTarget_initFBO(&phosphorLayer, screenW, screenH);
+    renderTarget_initFBO(&phosphorLayer2, screenW/4, screenH/4);
+    renderTarget_initFBO(&phosphorLayer3, screenW/24, screenH/24);
 
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_BLEND);
 
     int frameIdx = 0;
@@ -496,12 +543,6 @@ int main()
     while(!glfwWindowShouldClose(window))
     {
         gTime = (frameIdx * 1./60);
-        CHECK_GL_CALL( glBindFramebuffer(GL_FRAMEBUFFER, FramebufferName) );
-
-        glViewport(0,0,virtScreenW,virtScreenH);
-
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
 
         // for(int r = 0; r < rows; r++)
         // {
@@ -517,15 +558,18 @@ int main()
         // }
 
         static int mode = 0;
+        static int charSetLimit = 64;
 
         if(rand()%10 == 0) mode = rand()%10;
+
+        if(rand()%20 == 0) charSetLimit = 32+(rand()%(256-32));
 
         
         if(mode == 0)
         {
             for(int cc = 0; cc < 1; cc++)
             {
-                charIndices[rows-1][cursor % cols] = rand() % 64;
+                charIndices[rows-1][cursor % cols] = rand() % charSetLimit;
                 cursor += 1;
                 if(cursor >= cols)
                 {
@@ -574,46 +618,141 @@ int main()
             cursor = 0;
         }
 
+        /////////
+
+        renderTarget_bind(&virtScreen);
+
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
         SetupString(vertexBuf, &font, &charIndices[0][0], cols, rows, -1., -1., 2., 2.);
 
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
         CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 1.f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, texName) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
         CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6*rows*cols) );
+
+        renderTarget_finalize(&virtScreen);
 
         /////////
 
-        CHECK_GL_CALL( glBindFramebuffer(GL_FRAMEBUFFER, 0) );
+        renderTarget_bind(&phosphorLayer);
 
-        glViewport(0,0,screenW,screenH);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+
+        {
+            const float flickerA = 0.92f+0.08f*sinf(gTime*100.0f);
+            const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.77f;
+            const float sqX = (-scale*virtScreen.width)/screen.width;
+            const float sqY = -(-scale*virtScreen.height)/screen.height;
+            const float sqW = (2*scale*virtScreen.width)/screen.width;
+            const float sqH = -(2*scale*virtScreen.height)/screen.height;
+            SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
+            //SetupQuad(vertexBuf, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
+            CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
+            CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, flickerA) );
+            CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+            CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+            CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, virtScreen.tex) );
+            CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6*20*20) );
+        }
+
+        renderTarget_finalize(&phosphorLayer);
+
+        /////////
+
+        renderTarget_bind(&phosphorLayer2);
+
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 1.0f) );
+        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
+        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+
+        renderTarget_finalize(&phosphorLayer2);
+
+        /////////
+
+        renderTarget_bind(&phosphorLayer3);
+
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 1.0f) );
+        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
+        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+
+        renderTarget_finalize(&phosphorLayer3);
+
+        /////////
+
+        renderTarget_bind(&screen);
 
         //glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         //glClear(GL_COLOR_BUFFER_BIT);
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.8f) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.7f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, bgTexID) );
         CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
 
-        const float scale = std::min( (float)screenW/virtScreenW, (float)screenH/virtScreenH) * 0.77f;
+        // {
+        //     const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.77f;
+        //     const float sqX = (-scale*virtScreen.width)/screen.width;
+        //     const float sqY = -(-scale*virtScreen.height)/screen.height;
+        //     const float sqW = (2*scale*virtScreen.width)/screen.width;
+        //     const float sqH = -(2*scale*virtScreen.height)/screen.height;
+        //     SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
+        //     //SetupQuad(vertexBuf, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
+        //     CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
+        //     CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.7f) );
+        //     CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        //     CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        //     CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, virtScreen.tex) );
+        //     CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6*20*20) );
+        // }
 
-        const float sqX = (-scale*virtScreenW)/screenW;
-        const float sqY = -(-scale*virtScreenH)/screenH;
-        const float sqW = (2*scale*virtScreenW)/screenW;
-        const float sqH = -(2*scale*virtScreenH)/screenH;
-        SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
-        //SetupQuad(vertexBuf, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
+        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.8f) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.7f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, renderedTexture) );
-        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6*20*20) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
+        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+
+        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.1f) );
+        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
+        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+
+        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.2f) );
+        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer3.tex) );
+        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+
+        
 
         glfwSwapBuffers(window);
         glfwPollEvents();
