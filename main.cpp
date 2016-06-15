@@ -111,10 +111,43 @@ bool LoadFont(Font* font, const char* imgFile, int nRows, int nCols)
 
 typedef struct
 {
-    float Position[2];
-    float TexCoord[2];
+    float x;
+    float y;
+    float tx;
+    float ty;
 } Vertex;
 
+void SetupRawQuadPosition(Vertex* vertexBuf,
+    float x1, float y1,
+    float x2, float y2,
+    float x3, float y3,
+    float x4, float y4)
+{
+    vertexBuf[0].x = x1;
+    vertexBuf[0].y = y1;
+    vertexBuf[1].x = x2;
+    vertexBuf[1].y = y2;
+    vertexBuf[2].x = x3;
+    vertexBuf[2].y = y3;
+    vertexBuf[3].x = x4;
+    vertexBuf[3].y = y4;
+}
+
+void SetupRawQuadTexCoord(Vertex* vertexBuf,
+    float tx1, float ty1,
+    float tx2, float ty2,
+    float tx3, float ty3,
+    float tx4, float ty4)
+{
+    vertexBuf[0].tx = tx1;
+    vertexBuf[0].ty = ty1;
+    vertexBuf[1].tx = tx2;
+    vertexBuf[1].ty = ty2;
+    vertexBuf[2].tx = tx3;
+    vertexBuf[2].ty = ty3;
+    vertexBuf[3].tx = tx4;
+    vertexBuf[3].ty = ty4;
+}
 
 void SetupRawQuad(Vertex* vertexBuf,
   float x1, float y1, float tx1, float ty1,
@@ -122,84 +155,40 @@ void SetupRawQuad(Vertex* vertexBuf,
   float x3, float y3, float tx3, float ty3,
   float x4, float y4, float tx4, float ty4)
 {
-    y1 = -y1;
-    y2 = -y2;
-    y3 = -y3;
-    y4 = -y4;
-    ty1 = 1.f - ty1;
-    ty2 = 1.f - ty2;
-    ty3 = 1.f - ty3;
-    ty4 = 1.f - ty4;
-
-    vertexBuf[0].Position[0] = x1;
-    vertexBuf[0].Position[1] = y1;
-    vertexBuf[0].TexCoord[0] = tx1;
-    vertexBuf[0].TexCoord[1] = ty1;
-
-    vertexBuf[1].Position[0] = x2;
-    vertexBuf[1].Position[1] = y2;
-    vertexBuf[1].TexCoord[0] = tx2;
-    vertexBuf[1].TexCoord[1] = ty2;
-
-    vertexBuf[2].Position[0] = x3;
-    vertexBuf[2].Position[1] = y3;
-    vertexBuf[2].TexCoord[0] = tx3;
-    vertexBuf[2].TexCoord[1] = ty3;
-
-    vertexBuf[3].Position[0] = x2;
-    vertexBuf[3].Position[1] = y2;
-    vertexBuf[3].TexCoord[0] = tx2;
-    vertexBuf[3].TexCoord[1] = ty2;
-
-    vertexBuf[4].Position[0] = x3;
-    vertexBuf[4].Position[1] = y3;
-    vertexBuf[4].TexCoord[0] = tx3;
-    vertexBuf[4].TexCoord[1] = ty3;
-
-    vertexBuf[5].Position[0] = x4;
-    vertexBuf[5].Position[1] = y4;
-    vertexBuf[5].TexCoord[0] = tx4;
-    vertexBuf[5].TexCoord[1] = ty4;
+    SetupRawQuadPosition(vertexBuf, x1, y1, x2, y2, x3, y3, x4, y4);
+    SetupRawQuadTexCoord(vertexBuf, tx1, ty1, tx2, ty2, tx3, ty3, tx4, ty4);
 }
 
 void SetupQuad(Vertex* vertexBuf, float x, float y, float w, float h, float tx, float ty, float tw, float th)
 {
-    const float ty2 = 1.0f - ty;
+    const float ty2 = ty + th;
     const float tx2 = tx + tw;
-    const float ty1 = ty2 - th;
-    const float y1 = -y;
+    const float ty1 = ty;
+    const float tx1 = tx;
+    const float x1 = x;
+    const float y1 = y;
     const float x2 = x + w;
-    const float y2 = -(y + h);
+    const float y2 = y + h;
 
-    vertexBuf[0].Position[0] = x2;
-    vertexBuf[0].Position[1] = y1;
-    vertexBuf[0].TexCoord[0] = tx2;
-    vertexBuf[0].TexCoord[1] = ty2;
+    vertexBuf[0].x = x1;
+    vertexBuf[0].y = y1;
+    vertexBuf[0].tx = tx1;
+    vertexBuf[0].ty = ty1;
 
-    vertexBuf[1].Position[0] = x2;
-    vertexBuf[1].Position[1] = y2;
-    vertexBuf[1].TexCoord[0] = tx2;
-    vertexBuf[1].TexCoord[1] = ty1;
+    vertexBuf[1].x = x2;
+    vertexBuf[1].y = y1;
+    vertexBuf[1].tx = tx2;
+    vertexBuf[1].ty = ty1;
 
-    vertexBuf[2].Position[0] = x;
-    vertexBuf[2].Position[1] = y2;
-    vertexBuf[2].TexCoord[0] = tx;
-    vertexBuf[2].TexCoord[1] = ty1;
+    vertexBuf[2].x = x1;
+    vertexBuf[2].y = y2;
+    vertexBuf[2].tx = tx1;
+    vertexBuf[2].ty = ty2;
 
-    vertexBuf[3].Position[0] = x2;
-    vertexBuf[3].Position[1] = y1;
-    vertexBuf[3].TexCoord[0] = tx2;
-    vertexBuf[3].TexCoord[1] = ty2;
-
-    vertexBuf[4].Position[0] = x;
-    vertexBuf[4].Position[1] = y2;
-    vertexBuf[4].TexCoord[0] = tx;
-    vertexBuf[4].TexCoord[1] = ty1;
-
-    vertexBuf[5].Position[0] = x;
-    vertexBuf[5].Position[1] = y1;
-    vertexBuf[5].TexCoord[0] = tx;
-    vertexBuf[5].TexCoord[1] = ty2;
+    vertexBuf[3].x = x2;
+    vertexBuf[3].y = y2;
+    vertexBuf[3].tx = tx2;
+    vertexBuf[3].ty = ty2;
 }
 
 void SetupGlyph(Vertex* vertexBuf, Font* font, int charIdx, float x, float y, float w, float h)
@@ -210,8 +199,9 @@ void SetupGlyph(Vertex* vertexBuf, Font* font, int charIdx, float x, float y, fl
     const float th = (1.0f / font->nRows);
     const float tx = col * tw;
     const float ty = row * th;
-    const float ti = 0;
-    SetupQuad(vertexBuf, x, y, w, h, tx+ti, ty+ti, tw-ti*2, th-ti*2);
+    const float pi = 0.002f;
+    const float ti = 0.002f;
+    SetupQuad(vertexBuf, x+pi, y+pi, w-pi*2, h-pi*2, tx+ti, ty+ti, tw-ti*2, th-ti*2);
 }
 
 void SetupString(Vertex* vertexBuf, Font* font, int* charIndices, int nCols, int nRows, float x, float y, float w, float h)
@@ -221,7 +211,7 @@ void SetupString(Vertex* vertexBuf, Font* font, int* charIndices, int nCols, int
     const float charH = h / nRows;
     for(int n = 0; n < nChars; n++)
     {
-        SetupGlyph(&vertexBuf[n*6], font, charIndices[n], x+charW*(n%nCols), y+charH*(n/nCols), charW, charH);
+        SetupGlyph(&vertexBuf[n*4], font, charIndices[n], x+charW*(n%nCols), y+charH*(n/nCols), charW, charH);
     }
 }
 
@@ -233,51 +223,138 @@ void warp(float& x, float& y)
     float oy = y;
     //float d = sqrtf(ox*ox+oy*oy);
     float d = (ox*ox*oy*oy);
-    const float warpAmt = 0.15f;
-    x = ox + ox * d * -warpAmt + sinf(y*4. + gTime*15.) * 0.00015f;
+    const float warpAmt = 0.03f;
+    x = ox + ox * d * -warpAmt;
     y = oy + oy * d * -warpAmt;
-    x += (rand()%10)*0.00015f;
 }
 
-void SetupGrid(Vertex* vertexBuf, int nCols, int nRows, float x, float y, float w, float h, float tx, float ty, float tw, float th)
+struct screenGrid
 {
-    const float tcw = tw / nCols;
-    const float tch = th / nRows;
-    const float cw = w / nCols;
-    const float ch = h / nRows;
-    for(int row = 0; row < nRows; row++)
+    int width;
+    int height;
+    Vertex* origPoints;
+    Vertex* dynamicPoints;
+    Vertex* jitterVector;
+};
+
+void screenGrid_init(screenGrid* g, int width, int height)
+{
+    g->width = width;
+    g->height = height;
+    g->origPoints = (Vertex*)malloc(sizeof(Vertex) * width * height);
+    g->dynamicPoints = (Vertex*)malloc(sizeof(Vertex) * width * height);
+    g->jitterVector = (Vertex*)malloc(sizeof(Vertex) * width * height);
+
+    const float sx = 2.f / (width-1);
+    const float sy = 2.f / (height-1);
+
+    const float stx = 1.f / (width-1);
+    const float sty = 1.f / (height-1);
+
+    for(int y = 0; y < height; y++)
     {
-        for(int col = 0; col < nCols; col++)
+        for(int x = 0; x < width; x++)
         {
-            float x1 = (x + col * cw);
-            float y1 = (y + row * ch);
-            float x4 = (x1 + cw);
-            float y4 = (y1 + ch);
-            float x2 = x4;
-            float y2 = y1;
-            float x3 = x1;
-            float y3 = y4;
-            float tx1 = tx + col * tcw;
-            float ty1 = ty + row * tch;
-            float tx4 = tx1 + tcw;
-            float ty4 = ty1 + tch;
-            float tx2 = tx4;
-            float ty2 = ty1;
-            float tx3 = tx1;
-            float ty3 = ty4;
-            warp(x1, y1);
-            warp(x2, y2);
-            warp(x3, y3);
-            warp(x4, y4);
-            SetupRawQuad(&vertexBuf[(nCols*row+col)*6],
-               x1, y1, tx1, ty1,
-               x2, y2, tx2, ty2,
-               x3, y3, tx3, ty3,
-               x4, y4, tx4, ty4);
+            float fx = -1.f + (float)x * sx;
+            float fy = -1.f + (float)y * sy;
+            float tx = (float)x * stx;
+            float ty = (float)y * sty;
+            float jfx = fx + 0.00015f;
+            float jfy = fy;
+
+            //float d = sqrtf(ox*ox+oy*oy);
+            warp(fx, fy);
+            warp(jfx, jfy);
+
+            Vertex& orig = g->origPoints[y*g->width+x];
+            Vertex& dyn = g->dynamicPoints[y*g->width+x];
+            Vertex& jit = g->jitterVector[y*g->width+x];
+
+            orig.x = fx * 0.5f + 0.5f;
+            orig.y = fy * 0.5f + 0.5f;
+            orig.tx = tx;
+            orig.ty = ty;
+
+            jit.x = jfx - fx;
+            jit.y = jfy - fy;
+
+            dyn = orig;
+        }
+    }
+}
+
+
+void screenGrid_update(screenGrid* g, Vertex* vertexBuf, float ox, float oy, float w, float h, float tx, float ty, float tw, float th)
+{
+    for(int y = 0; y < g->height; y++)
+    {
+        for(int x = 0; x < g->width; x++)
+        {
+            const Vertex& orig = g->origPoints[y*g->width+x];
+            const Vertex& jit = g->jitterVector[y*g->width+x];
+            Vertex& dyn = g->dynamicPoints[y*g->width+x];
+
+            float jitAmt = sinf(y*4. + gTime*15.) * 0.5f + (rand()%10)*0.5f;
+
+            dyn.x = ox + (orig.x + jit.x * jitAmt) * w;
+            dyn.y = oy + (orig.y + jit.y * jitAmt) * h;
+            dyn.tx = tx + orig.tx * tw;
+            dyn.ty = ty + orig.ty * th;
         }
     }
 
+    GLuint vidx = 0;
+    for(int y = 0; y < g->height-1; y++)
+    {
+        for(int x = 0; x < g->width-1; x++)
+        {
+            vertexBuf[vidx++] = g->dynamicPoints[(y+0)*g->width+(x+0)];
+            vertexBuf[vidx++] = g->dynamicPoints[(y+0)*g->width+(x+1)];
+            vertexBuf[vidx++] = g->dynamicPoints[(y+1)*g->width+(x+0)];
+            vertexBuf[vidx++] = g->dynamicPoints[(y+1)*g->width+(x+1)];
+        }
+    }
 }
+
+// void SetupGrid(Vertex* vertexBuf, int nCols, int nRows, float x, float y, float w, float h, float tx, float ty, float tw, float th)
+// {
+//     const float tcw = tw / nCols;
+//     const float tch = th / nRows;
+//     const float cw = w / nCols;
+//     const float ch = h / nRows;
+//     for(int row = 0; row < nRows; row++)
+//     {
+//         for(int col = 0; col < nCols; col++)
+//         {
+//             float x1 = (x + col * cw);
+//             float y1 = (y + row * ch);
+//             float x4 = (x1 + cw);
+//             float y4 = (y1 + ch);
+//             float x2 = x4;
+//             float y2 = y1;
+//             float x3 = x1;
+//             float y3 = y4;
+//             float tx1 = tx + col * tcw;
+//             float ty1 = ty + row * tch;
+//             float tx4 = tx1 + tcw;
+//             float ty4 = ty1 + tch;
+//             float tx2 = tx4;
+//             float ty2 = ty1;
+//             float tx3 = tx1;
+//             float ty3 = ty4;
+//             warp(x1, y1);
+//             warp(x2, y2);
+//             warp(x3, y3);
+//             warp(x4, y4);
+//             SetupRawQuad(&vertexBuf[(nCols*row+col)*4],
+//                x1, y1, tx1, ty1,
+//                x2, y2, tx2, ty2,
+//                x3, y3, tx3, ty3,
+//                x4, y4, tx4, ty4);
+//         }
+//     }
+
+// }
 
 void myGlfwErrorCB(int error, const char* description)
 {
@@ -408,8 +485,8 @@ int main()
         SHADER_LINE( "attribute vec2 Position;" )
         SHADER_LINE( "attribute vec2 TexCoord;" )
         SHADER_LINE( "void main(void) {" )
-        SHADER_LINE( "    gl_Position = vec4(Position,0,1);" )
-        SHADER_LINE( "    gl_TexCoord[0] = vec4(TexCoord,0,0);" )
+        SHADER_LINE( "    gl_Position = vec4(Position.x,-Position.y,0,1);" )
+        SHADER_LINE( "    gl_TexCoord[0] = vec4(TexCoord.x,1.-TexCoord.y,0,0);" )
         SHADER_LINE( "}" )
     };
 
@@ -426,7 +503,6 @@ int main()
 
 
     int charIndices[rows][cols];
-    Vertex vertexBuf[6 * cols * rows];
 
     for(int r = 0; r < rows; r++)
     {
@@ -465,21 +541,36 @@ int main()
     CHECK_GL_CALL( glEnableVertexAttribArray(positionSlot) );
     CHECK_GL_CALL( glEnableVertexAttribArray(texCoordSlot) );
 
+    const int maxQuads = rows * cols;
+
+    GLuint quadIndices[6*maxQuads];
+    Vertex vertexBuf[4*maxQuads];
+
+    for(int n = 0; n < maxQuads; n++)
+    {
+        quadIndices[n*6+0] = n*4 + 0;
+        quadIndices[n*6+1] = n*4 + 1;
+        quadIndices[n*6+2] = n*4 + 2;
+        quadIndices[n*6+3] = n*4 + 1;
+        quadIndices[n*6+4] = n*4 + 2;
+        quadIndices[n*6+5] = n*4 + 3;
+    }
+
+    GLuint indexBuffer;
+    CHECK_GL_CALL( glGenBuffers(1, &indexBuffer) );
+    CHECK_GL_CALL( glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer) );
+    CHECK_GL_CALL( glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(quadIndices), quadIndices, GL_STATIC_DRAW) );
+
+
     GLuint vertexBuffer;
     CHECK_GL_CALL( glGenBuffers(1, &vertexBuffer) );
     CHECK_GL_CALL( glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer) );
     CHECK_GL_CALL( glBufferData(GL_ARRAY_BUFFER, sizeof(vertexBuf), vertexBuf, GL_DYNAMIC_DRAW) );
 
-    // GLuint indexBuffer;
-    // CHECK_GL_CALL( glGenBuffers(1, &indexBuffer) );
-    // CHECK_GL_CALL( glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer) );
-    // CHECK_GL_CALL( glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(Indices), Indices, GL_STATIC_DRAW) );
-
-
     CHECK_GL_CALL( glUseProgram(program) );
 
-    CHECK_GL_CALL( glVertexAttribPointer(positionSlot, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,Position)) );
-    CHECK_GL_CALL( glVertexAttribPointer(texCoordSlot, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,TexCoord)) );
+    CHECK_GL_CALL( glVertexAttribPointer(positionSlot, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,x)) );
+    CHECK_GL_CALL( glVertexAttribPointer(texCoordSlot, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,tx)) );
 
     CHECK_GL_CALL( GLuint texLoc = glGetUniformLocation(program, "tex") );
     CHECK_GL_CALL( glUniform1i(texLoc, 0) );
@@ -535,6 +626,10 @@ int main()
     renderTarget_initFBO(&phosphorLayer, screenW, screenH);
     renderTarget_initFBO(&phosphorLayer2, screenW/4, screenH/4);
     renderTarget_initFBO(&phosphorLayer3, screenW/24, screenH/24);
+
+    screenGrid grid;
+
+    screenGrid_init(&grid, 20, 20);
 
     glEnable(GL_BLEND);
 
@@ -632,7 +727,7 @@ int main()
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
-        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6*rows*cols) );
+        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*rows*cols, GL_UNSIGNED_INT, 0) );
 
         renderTarget_finalize(&virtScreen);
 
@@ -643,22 +738,23 @@ int main()
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
+        const float flickerA = 0.92f+0.08f*sinf(gTime*100.0f);
+
 
         {
-            const float flickerA = 0.92f+0.08f*sinf(gTime*100.0f);
-            const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.77f;
+            const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.73f;
             const float sqX = (-scale*virtScreen.width)/screen.width;
-            const float sqY = -(-scale*virtScreen.height)/screen.height;
+            const float sqY = (-scale*virtScreen.height)/screen.height-0.09;
             const float sqW = (2*scale*virtScreen.width)/screen.width;
-            const float sqH = -(2*scale*virtScreen.height)/screen.height;
-            SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
-            //SetupQuad(vertexBuf, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
+            const float sqH = (2*scale*virtScreen.height)/screen.height*1.2;
+            //SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
+            screenGrid_update(&grid, vertexBuf, sqX, sqY, sqW, sqH, 0, 0, 1, 1);
             CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-            CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, flickerA) );
+            CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 1.f) );
             CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
             CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
             CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, virtScreen.tex) );
-            CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6*20*20) );
+            CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*(grid.width-1)*(grid.height-1), GL_UNSIGNED_INT, 0) );
         }
 
         renderTarget_finalize(&phosphorLayer);
@@ -676,7 +772,7 @@ int main()
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
-        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
 
         renderTarget_finalize(&phosphorLayer2);
 
@@ -693,7 +789,7 @@ int main()
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
-        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
 
         renderTarget_finalize(&phosphorLayer3);
 
@@ -704,53 +800,39 @@ int main()
         //glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         //glClear(GL_COLOR_BUFFER_BIT);
 
+        float brightness = 0.95f;
+
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
         CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.7f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, bgTexID) );
-        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
-
-        // {
-        //     const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.77f;
-        //     const float sqX = (-scale*virtScreen.width)/screen.width;
-        //     const float sqY = -(-scale*virtScreen.height)/screen.height;
-        //     const float sqW = (2*scale*virtScreen.width)/screen.width;
-        //     const float sqH = -(2*scale*virtScreen.height)/screen.height;
-        //     SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
-        //     //SetupQuad(vertexBuf, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
-        //     CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        //     CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.7f) );
-        //     CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
-        //     CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        //     CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, virtScreen.tex) );
-        //     CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6*20*20) );
-        // }
+        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.7f) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * 0.7f * flickerA) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
-        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.1f) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * 0.1f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
-        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 0.2f) );
+        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * 0.2f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer3.tex) );
-        CHECK_GL_CALL( glDrawArrays(GL_TRIANGLES, 0, 6) );
+        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
 
         
 
