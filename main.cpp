@@ -6,8 +6,9 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cmath>
+#include <sys/time.h>
 
-//#define FULLSCREEN
+#define FULLSCREEN
 #define SCREEN_W    (1024)
 #define SCREEN_H    (768)
 
@@ -18,6 +19,13 @@
 
 #define CHECK_SHADER_ERROR(handle) { GLint compileSuccess = 0; glGetShaderiv(handle, GL_COMPILE_STATUS, &compileSuccess); if(!compileSuccess) { GLchar messages[256]; glGetShaderInfoLog(handle, sizeof(messages), 0, &messages[0]); printf("Shader compile error at %s:%d: %s\n", __FILE__, __LINE__, messages); exit(1); } }
 #define CHECK_LINK_ERROR(handle) { GLint compileSuccess = 0; glGetProgramiv(handle, GL_LINK_STATUS, &compileSuccess); if(!compileSuccess) { GLchar messages[256]; glGetProgramInfoLog(handle, sizeof(messages), 0, &messages[0]); printf("Shader link error at %s:%d: %s\n", __FILE__, __LINE__, messages); exit(1); } }
+
+double getCurrentTime(void)
+{
+    struct timeval t;
+    gettimeofday(&t, NULL);
+    return (double)t.tv_sec + ((double)t.tv_usec)*1e-6;
+}
 
 typedef struct
 {
@@ -217,7 +225,7 @@ void SetupString(Vertex* vertexBuf, Font* font, int* charIndices, int nCols, int
     }
 }
 
-float gTime = 0.f;
+double gTime = 0;
 
 void warp(float& x, float& y)
 {
@@ -599,7 +607,16 @@ void updateChars(int* charIndices, int rows, int cols)
     static int charSetLimit = 64;
     static int cursor = 0;
     static int tick = 0;
+    static double lastUpdateTime = 0;
 
+    const double now = getCurrentTime();
+
+    if((now - lastUpdateTime) < (1./60))
+    {
+        return;
+    }
+
+    lastUpdateTime = now;
     ++tick;
 
 #if 1
@@ -736,6 +753,9 @@ int main()
     //glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     //glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+    glfwWindowHint(GLFW_DOUBLEBUFFER, GL_TRUE);
+
+    //glfwWindowHint(GLFW_SAMPLES, 4);
 
     GLFWmonitor* monitor = NULL;
 #ifdef FULLSCREEN
@@ -752,7 +772,7 @@ int main()
 
     glfwMakeContextCurrent(window);
     glfwSetKeyCallback(window, myGlfwKeyCB);
-    glfwSwapInterval(1);
+    glfwSwapInterval(0);
 
     //printf("OpenGL version supported by this platform (%s): \n", glGetString(GL_VERSION));
 
@@ -881,11 +901,17 @@ int main()
     int frameIdx = 0;
 
     normalShader_select(&shNorm);
+
+    double lastFrameTime = getCurrentTime();
     
     while(!glfwWindowShouldClose(window))
     {
-        const float frameDelta = 1.f / 60;
-        gTime = (frameIdx * frameDelta);
+        const double now = getCurrentTime();
+        const double frameDelta = (now - lastFrameTime);
+        lastFrameTime = now;
+        gTime += frameDelta;
+
+        const float tcAdjust = 1.0f; //TODO: adjust time constants
 
         // for(int r = 0; r < rows; r++)
         // {
@@ -940,7 +966,7 @@ int main()
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        const float flickerA = 0.93f+0.07f*sinf(gTime*100.0f);
+        const float flickerA = 0.95f+0.05f*sinf(gTime*100.0f);
 
 #if 1
         const float fontColorR = 0.3f;
@@ -955,9 +981,9 @@ int main()
         ghostShader_select(&shGhost);
 
         static float driftGhost = 0.0f;
-        driftGhost += (((float)(rand()%100)/100.f) - driftGhost) * 0.3f;
+        driftGhost += (((float)(rand()%100)/100.f) - driftGhost) * 0.3f * tcAdjust;
         static float driftGhostAmt = 0.0f;
-        driftGhostAmt += (((float)(rand()%100)/100.f) - driftGhostAmt) * 0.2f;
+        driftGhostAmt += (((float)(rand()%100)/100.f) - driftGhostAmt) * 0.2f * tcAdjust;
         CHECK_GL_CALL( glUniform1f(shGhost.texGhostDist, 0.002f + 0.002f * driftGhost) );
         CHECK_GL_CALL( glUniform1f(shGhost.texGhostAmt, 0.15f * driftGhostAmt) );
 
@@ -1060,7 +1086,6 @@ int main()
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer3.tex) );
         CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
 
-        
 
         glfwSwapBuffers(window);
         glfwPollEvents();
