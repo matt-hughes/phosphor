@@ -8,6 +8,8 @@
 #include <cmath>
 
 //#define FULLSCREEN
+#define SCREEN_W    (1024)
+#define SCREEN_H    (768)
 
 #define BLANK_CHAR  0x20
 
@@ -294,7 +296,7 @@ void screenGrid_update(screenGrid* g, Vertex* vertexBuf, float ox, float oy, flo
             const Vertex& jit = g->jitterVector[y*g->width+x];
             Vertex& dyn = g->dynamicPoints[y*g->width+x];
 
-            float jitAmt = sinf(y*4. + gTime*15.) * 0.5f + (rand()%100)*0.035f;
+            float jitAmt = sinf(y*0.3f + gTime*15.f) * 0.5f + (rand()%100)*0.035f;
 
             dyn.x = ox + (orig.x + jit.x * jitAmt) * w;
             dyn.y = oy + (orig.y + jit.y * jitAmt) * h;
@@ -371,13 +373,133 @@ void myGlfwKeyCB(GLFWwindow* window, int key, int scancode, int action, int mods
     }
 }
 
-typedef struct
+void compileShader(const char* vertexSrc, const char* fragmentSrc, GLuint* retProgram)
+{
+    CHECK_GL_CALL( *retProgram = glCreateProgram() );
+    CHECK_GL_CALL( GLuint fs = glCreateShader(GL_FRAGMENT_SHADER) );
+    CHECK_GL_CALL( glShaderSource(fs, 1, &fragmentSrc, NULL) );
+    glCompileShader(fs);
+    CHECK_SHADER_ERROR(fs);
+
+    CHECK_GL_CALL( GLuint vs = glCreateShader(GL_VERTEX_SHADER) );
+    CHECK_GL_CALL( glShaderSource(vs, 1, &vertexSrc, NULL) );
+    glCompileShader(vs);
+    CHECK_SHADER_ERROR(vs);
+
+    CHECK_GL_CALL( glAttachShader(*retProgram, vs) );
+    CHECK_GL_CALL( glAttachShader(*retProgram, fs) );
+
+    glLinkProgram(*retProgram);
+    CHECK_LINK_ERROR(*retProgram);
+}
+
+#define SHADER_LINE(x)  x "\n"
+
+static const char* vs_source =
+//SHADER_LINE( "#version 110 core" )
+SHADER_LINE( "attribute vec2 Position;" )
+SHADER_LINE( "attribute vec2 TexCoord;" )
+SHADER_LINE( "void main(void) {" )
+SHADER_LINE( "    gl_Position = vec4(Position.x,-Position.y,0,1);" )
+SHADER_LINE( "    gl_TexCoord[0] = vec4(TexCoord.x,1.-TexCoord.y,0,0);" )
+SHADER_LINE( "}" );
+
+static const char* fs_source_ghost =
+//SHADER_LINE( "#version 110 core" )
+SHADER_LINE( "uniform sampler2D tex;" )
+SHADER_LINE( "uniform vec4 color;" )
+SHADER_LINE( "uniform float ghostDist;" )
+SHADER_LINE( "uniform float ghostAmt;" )
+SHADER_LINE( "void main(void) {" )
+SHADER_LINE( "    vec4 s1 = texture2D(tex, gl_TexCoord[0].xy);" )
+SHADER_LINE( "    vec4 s2 = texture2D(tex, gl_TexCoord[0].xy + vec2(-ghostDist,0.0));" )
+SHADER_LINE( "    vec4 s3 = texture2D(tex, gl_TexCoord[0].xy + vec2(-ghostDist*2.,0.0));" )
+SHADER_LINE( "    gl_FragColor = (s1 + (s2 + s3*0.3)*ghostAmt) * color;" )
+//SHADER_LINE( "    gl_FragColor = vec4(1,1,1,1);" )
+SHADER_LINE( "}" );
+
+static const char * fs_source_normal =
+//SHADER_LINE( "#version 110 core" )
+SHADER_LINE( "uniform sampler2D tex;" )
+SHADER_LINE( "uniform vec4 color;" )
+SHADER_LINE( "uniform float ghostDist;" )
+SHADER_LINE( "uniform float ghostAmt;" )
+SHADER_LINE( "void main(void) {" )
+SHADER_LINE( "    vec4 s1 = texture2D(tex, gl_TexCoord[0].xy);" )
+SHADER_LINE( "    gl_FragColor = s1 * color;" )
+//SHADER_LINE( "    gl_FragColor = vec4(1,1,1,1);" )
+SHADER_LINE( "}" );
+
+
+struct normalShader
+{
+    GLuint program;
+    GLuint position;
+    GLuint texCoord;
+    GLuint texColor;
+};
+
+void normalShader_init(normalShader* s)
+{
+    compileShader(vs_source, fs_source_normal, &s->program);
+    CHECK_GL_CALL( s->position = glGetAttribLocation(s->program, "Position") );
+    CHECK_GL_CALL( s->texCoord = glGetAttribLocation(s->program, "TexCoord") );
+    CHECK_GL_CALL( GLuint texUnit = glGetUniformLocation(s->program, "tex") );
+    CHECK_GL_CALL( s->texColor = glGetUniformLocation(s->program, "color") );
+    CHECK_GL_CALL( glUseProgram(s->program) );
+    CHECK_GL_CALL( glUniform1i(texUnit, 0) );
+}
+
+void normalShader_select(normalShader* s)
+{
+    CHECK_GL_CALL( glUseProgram(s->program) );
+    CHECK_GL_CALL( glEnableVertexAttribArray(s->position) );
+    CHECK_GL_CALL( glEnableVertexAttribArray(s->texCoord) );
+    CHECK_GL_CALL( glVertexAttribPointer(s->position, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,x)) );
+    CHECK_GL_CALL( glVertexAttribPointer(s->texCoord, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,tx)) );    
+}
+
+
+struct ghostShader
+{
+    GLuint program;
+    GLuint position;
+    GLuint texCoord;
+    GLuint texColor;
+    GLuint texGhostAmt;
+    GLuint texGhostDist;
+};
+
+void ghostShader_init(ghostShader* s)
+{
+    compileShader(vs_source, fs_source_ghost, &s->program);
+    CHECK_GL_CALL( s->position = glGetAttribLocation(s->program, "Position") );
+    CHECK_GL_CALL( s->texCoord = glGetAttribLocation(s->program, "TexCoord") );
+    CHECK_GL_CALL( GLuint texUnit = glGetUniformLocation(s->program, "tex") );
+    CHECK_GL_CALL( s->texColor = glGetUniformLocation(s->program, "color") );
+    CHECK_GL_CALL( s->texGhostDist = glGetUniformLocation(s->program, "ghostDist") );
+    CHECK_GL_CALL( s->texGhostAmt = glGetUniformLocation(s->program, "ghostAmt") );
+    CHECK_GL_CALL( glUseProgram(s->program) );
+    CHECK_GL_CALL( glUniform1i(texUnit, 0) );
+}
+
+void ghostShader_select(ghostShader* s)
+{
+    CHECK_GL_CALL( glUseProgram(s->program) );
+    CHECK_GL_CALL( glEnableVertexAttribArray(s->position) );
+    CHECK_GL_CALL( glEnableVertexAttribArray(s->texCoord) );
+    CHECK_GL_CALL( glVertexAttribPointer(s->position, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,x)) );
+    CHECK_GL_CALL( glVertexAttribPointer(s->texCoord, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,tx)) );    
+}
+
+
+struct renderTarget
 {
     GLuint fbo;
     GLuint tex;
     GLuint width;
     GLuint height;
-} renderTarget;
+};
 
 void renderTarget_initScreen(renderTarget* r, GLuint width, GLuint height)
 {
@@ -481,9 +603,17 @@ void updateChars(int* charIndices, int rows, int cols)
     ++tick;
 
 #if 1
-    if(rand()%300 == 0)
+    if(rand()%100 == 0)
     {
-        clearChars(charIndices, rows, cols, BLANK_CHAR);
+        //clearChars(charIndices, rows, cols, BLANK_CHAR);
+        int ct = 1 + rand()%(rows/2);
+        for(int r = rows-ct; r < rows; r++)
+        {
+            for(int c = 0; c < cols; c++)
+            {
+                CHAR_AT(r,c) = BLANK_CHAR;
+            }
+        }
     }
     else if(rand()%1 == 0)
     {
@@ -588,8 +718,8 @@ int main()
         exit(EXIT_FAILURE);
     }
 
-    const int screenW = 1024;
-    const int screenH = 768;
+    const int screenW = SCREEN_W;
+    const int screenH = SCREEN_H;
 
     const int cols = 40;
     const int rows = 25;
@@ -629,33 +759,7 @@ int main()
     glewExperimental = GL_TRUE;
     glewInit();
 
-#define SHADER_LINE(x)  x "\n"
 
-    static const char * vs_source[] =
-    {
-        //SHADER_LINE( "#version 110 core" )
-        SHADER_LINE( "attribute vec2 Position;" )
-        SHADER_LINE( "attribute vec2 TexCoord;" )
-        SHADER_LINE( "void main(void) {" )
-        SHADER_LINE( "    gl_Position = vec4(Position.x,-Position.y,0,1);" )
-        SHADER_LINE( "    gl_TexCoord[0] = vec4(TexCoord.x,1.-TexCoord.y,0,0);" )
-        SHADER_LINE( "}" )
-    };
-
-    static const char * fs_source[] =
-    {
-        //SHADER_LINE( "#version 110 core" )
-        SHADER_LINE( "uniform sampler2D tex;" )
-        SHADER_LINE( "uniform vec4 color;" )
-        SHADER_LINE( "uniform float ghostDist;" )
-        SHADER_LINE( "uniform float ghostAmt;" )
-        SHADER_LINE( "void main(void) {" )
-        SHADER_LINE( "    vec4 s1 = texture2D(tex, gl_TexCoord[0].xy);" )
-        SHADER_LINE( "    vec4 s2 = texture2D(tex, gl_TexCoord[0].xy + vec2(-ghostDist,0.0));" )
-        SHADER_LINE( "    gl_FragColor = (s1 + s2*ghostAmt) * color;" )
-        //SHADER_LINE( "    gl_FragColor = vec4(1,1,1,1);" )
-        SHADER_LINE( "}" )
-    };
 
 
     int charIndices[rows][cols];
@@ -673,29 +777,11 @@ int main()
     //     //2, 3, 0
     // };
 
-    CHECK_GL_CALL( GLuint normalShader = glCreateProgram() );
+    normalShader shNorm;
+    normalShader_init(&shNorm);
 
-    CHECK_GL_CALL( GLuint fs = glCreateShader(GL_FRAGMENT_SHADER) );
-    CHECK_GL_CALL( glShaderSource(fs, 1, fs_source, NULL) );
-    glCompileShader(fs);
-    CHECK_SHADER_ERROR(fs);
-
-    CHECK_GL_CALL( GLuint vs = glCreateShader(GL_VERTEX_SHADER) );
-    CHECK_GL_CALL( glShaderSource(vs, 1, vs_source, NULL) );
-    glCompileShader(vs);
-    CHECK_SHADER_ERROR(vs);
-
-    CHECK_GL_CALL( glAttachShader(normalShader, vs) );
-    CHECK_GL_CALL( glAttachShader(normalShader, fs) );
-
-    glLinkProgram(normalShader);
-    CHECK_LINK_ERROR(normalShader);
-
-    CHECK_GL_CALL( GLuint positionSlot = glGetAttribLocation(normalShader, "Position") );
-    CHECK_GL_CALL( GLuint texCoordSlot = glGetAttribLocation(normalShader, "TexCoord") );
-
-    CHECK_GL_CALL( glEnableVertexAttribArray(positionSlot) );
-    CHECK_GL_CALL( glEnableVertexAttribArray(texCoordSlot) );
+    ghostShader shGhost;
+    ghostShader_init(&shGhost);
 
     const int maxQuads = rows * cols;
 
@@ -723,18 +809,6 @@ int main()
     CHECK_GL_CALL( glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer) );
     CHECK_GL_CALL( glBufferData(GL_ARRAY_BUFFER, sizeof(vertexBuf), vertexBuf, GL_DYNAMIC_DRAW) );
 
-    CHECK_GL_CALL( glUseProgram(normalShader) );
-
-    CHECK_GL_CALL( glVertexAttribPointer(positionSlot, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,x)) );
-    CHECK_GL_CALL( glVertexAttribPointer(texCoordSlot, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex,tx)) );
-
-    CHECK_GL_CALL( GLuint texLoc = glGetUniformLocation(normalShader, "tex") );
-    CHECK_GL_CALL( glUniform1i(texLoc, 0) );
-
-    CHECK_GL_CALL( GLuint texColor = glGetUniformLocation(normalShader, "color") );
-    CHECK_GL_CALL( GLuint texGhostDist = glGetUniformLocation(normalShader, "ghostDist") );
-    CHECK_GL_CALL( GLuint texGhostAmt = glGetUniformLocation(normalShader, "ghostAmt") );
-
     Font font;
     if(!LoadFont(&font, "PetASCII4_mono.tga", 16, 16))
     {
@@ -749,30 +823,42 @@ int main()
         exit(1);
     }
 
+    TGAFILE scanTga;
+    if(!LoadTGAFile("ScanBG.tga", &scanTga))
+    {
+        printf("Failed to load scan img!\n");
+        exit(1);
+    }
+
     CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
 
     GLuint fontTex;
     CHECK_GL_CALL( glGenTextures(1, &fontTex) );
     CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
-
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-
     CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, font.tga.imageWidth, font.tga.imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, font.tga.imageData) );
     //CHECK_GL_CALL( glGenerateMipmap(GL_TEXTURE_2D) );
 
     GLuint bgTexID;
     CHECK_GL_CALL( glGenTextures(1, &bgTexID) );
     CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, bgTexID) );
-
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-
     CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, bgTga.imageWidth, bgTga.imageHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, bgTga.imageData) );
+
+    GLuint scanTexID;
+    CHECK_GL_CALL( glGenTextures(1, &scanTexID) );
+    CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, scanTexID) );
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, scanTga.imageWidth, scanTga.imageHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, scanTga.imageData) );
 
     renderTarget screen;
     renderTarget virtScreen;
@@ -793,10 +879,13 @@ int main()
     glEnable(GL_BLEND);
 
     int frameIdx = 0;
+
+    normalShader_select(&shNorm);
     
     while(!glfwWindowShouldClose(window))
     {
-        gTime = (frameIdx * 1./60);
+        const float frameDelta = 1.f / 60;
+        gTime = (frameIdx * frameDelta);
 
         // for(int r = 0; r < rows; r++)
         // {
@@ -815,13 +904,6 @@ int main()
 
         /////////
 
-        static float driftGhost = 0.0f;
-        driftGhost += (((float)(rand()%100)/100.f) - driftGhost) * 0.3f;
-        CHECK_GL_CALL( glUniform1f(texGhostDist, 0.002f + 0.002f * driftGhost) );
-        CHECK_GL_CALL( glUniform1f(texGhostAmt, 0.1f) );
-
-        /////////
-
         renderTarget_bind(&virtScreen);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -830,11 +912,24 @@ int main()
         SetupString(vertexBuf, &font, &charIndices[0][0], cols, rows, -1., -1., 2., 2.);
 
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 1.f) );
+        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, 1.f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
         CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*rows*cols, GL_UNSIGNED_INT, 0) );
+
+        const float scanAlpha = 0.15f;
+
+        static float scanOfs = 0.0f;
+        scanOfs += frameDelta * (50.f/60) * (1.f + (float)(rand()%30)/1000);
+        while(scanOfs > 1.f) scanOfs -= 1.f;
+        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, -scanOfs, 1, 1);
+        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
+        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, scanAlpha) );
+        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, scanTexID) );
+        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
 
         renderTarget_finalize(&virtScreen);
 
@@ -857,6 +952,14 @@ int main()
         const float fontColorB = 1.0f;
 #endif
 
+        ghostShader_select(&shGhost);
+
+        static float driftGhost = 0.0f;
+        driftGhost += (((float)(rand()%100)/100.f) - driftGhost) * 0.3f;
+        static float driftGhostAmt = 0.0f;
+        driftGhostAmt += (((float)(rand()%100)/100.f) - driftGhostAmt) * 0.2f;
+        CHECK_GL_CALL( glUniform1f(shGhost.texGhostDist, 0.002f + 0.002f * driftGhost) );
+        CHECK_GL_CALL( glUniform1f(shGhost.texGhostAmt, 0.15f * driftGhostAmt) );
 
         {
             const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.73f;
@@ -867,7 +970,7 @@ int main()
             //SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
             screenGrid_update(&grid, vertexBuf, sqX, sqY, sqW, sqH, 0, 0, 1, 1);
             CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-            CHECK_GL_CALL( glUniform4f(texColor, fontColorR, fontColorG, fontColorB, 1.f) );
+            CHECK_GL_CALL( glUniform4f(shGhost.texColor, fontColorR, fontColorG, fontColorB, 1.f) );
             CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
             CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
             CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, virtScreen.tex) );
@@ -880,12 +983,14 @@ int main()
 
         renderTarget_bind(&phosphorLayer2);
 
+        normalShader_select(&shNorm);
+
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 1.0f) );
+        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, 1.0f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
@@ -902,7 +1007,7 @@ int main()
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, 1.0f) );
+        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, 1.0f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
@@ -918,13 +1023,14 @@ int main()
         //glClear(GL_COLOR_BUFFER_BIT);
 
         float bgBrightness = 1.115f;
-        float brightness = 0.90f;
+        float brightness = 0.93f;
         float largeGlowAmt = 0.2f;
         float smallGlowAmt = 0.1f;
+        float bgPersist = 0.2f;
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(texColor, bgBrightness, bgBrightness, bgBrightness, 0.7f) );
+        CHECK_GL_CALL( glUniform4f(shNorm.texColor, bgBrightness, bgBrightness, bgBrightness, 1.f-bgPersist) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, bgTexID) );
@@ -932,7 +1038,7 @@ int main()
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * 0.7f * flickerA) );
+        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, brightness * 0.7f * flickerA) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
@@ -940,7 +1046,7 @@ int main()
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * smallGlowAmt) );
+        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, brightness * smallGlowAmt) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
@@ -948,7 +1054,7 @@ int main()
 
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(texColor, 1.f, 1.f, 1.f, brightness * largeGlowAmt) );
+        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, brightness * largeGlowAmt) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer3.tex) );

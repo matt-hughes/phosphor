@@ -4,7 +4,7 @@ SRC = main.cpp
 
 INCLUDE = -I/usr/local/include
 LIBS = -L/usr/local/lib
-CFLAGS = -w
+CFLAGS = -w -g
 LDFLAGS = -framework OpenGL -lglfw3 -lglew
 
 APP_NAME = phosphor
