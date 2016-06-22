@@ -1,4 +1,7 @@
-SRC = main.cpp
+SRC = \
+	main.cpp \
+	fake6502.c \
+	emu.c
 
 #CC ?= g++
 

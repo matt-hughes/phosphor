@@ -11,6 +11,9 @@
 #define FULLSCREEN
 #define SCREEN_W    (1024)
 #define SCREEN_H    (768)
+//#define SCREEN_W    (720)
+//#define SCREEN_H    (540)
+//#define ALTERNATE_GAMMA
 
 #define BLANK_CHAR  0x20
 
@@ -611,7 +614,7 @@ void updateChars(int* charIndices, int rows, int cols)
 
     const double now = getCurrentTime();
 
-    if((now - lastUpdateTime) < (1./60))
+    if((now - lastUpdateTime) < (1./30))
     {
         return;
     }
@@ -944,10 +947,10 @@ int main()
         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
         CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*rows*cols, GL_UNSIGNED_INT, 0) );
 
-        const float scanAlpha = 0.15f;
+        const float scanAlpha = 0.08f;
 
         static float scanOfs = 0.0f;
-        scanOfs += frameDelta * (50.f/60) * (1.f + (float)(rand()%30)/1000);
+        scanOfs += frameDelta * 0.5f * (1.f + (float)(rand()%30)/1000);
         while(scanOfs > 1.f) scanOfs -= 1.f;
         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, -scanOfs, 1, 1);
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
@@ -1048,7 +1051,11 @@ int main()
         //glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         //glClear(GL_COLOR_BUFFER_BIT);
 
+#ifdef ALTERNATE_GAMMA
+        float bgBrightness = 0.3f;
+#else
         float bgBrightness = 1.115f;
+#endif
         float brightness = 0.93f;
         float largeGlowAmt = 0.2f;
         float smallGlowAmt = 0.1f;
