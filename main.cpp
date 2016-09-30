@@ -1,27 +1,56 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#ifdef TARGET_RPI
+#include <GLES2/gl2.h>
+extern "C" int rpi_egl_init(void);
+extern "C" int rpi_egl_swap(void);
+#else
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#endif
 #include <cstddef>
 #include <cstdlib>
 #include <algorithm>
 #include <cmath>
 #include <sys/time.h>
 
+#ifdef USE_USB_SERIAL
+#include "frameReadThread.h"
+#endif
+
 #define FULLSCREEN
+#ifdef TARGET_RPI
+#define SCREEN_W    (1280)
+#define SCREEN_H    (720)
+#define PHOSPHORLAYER_W     SCREEN_W
+#define PHOSPHORLAYER_H     SCREEN_H
+#else
 #define SCREEN_W    (1024)
 #define SCREEN_H    (768)
+#define PHOSPHORLAYER_W     SCREEN_W
+#define PHOSPHORLAYER_H     SCREEN_H
+#endif
 //#define SCREEN_W    (720)
 //#define SCREEN_H    (540)
 //#define ALTERNATE_GAMMA
 
+#define CHAR_COLS   80
+#define CHAR_ROWS   25
+
 #define BLANK_CHAR  0x20
 
-#define CHECK_ERROR() { GLint err = glGetError(); if(err != GL_NO_ERROR) { printf("Error %d at %s:%d\n", err, __FILE__, __LINE__); exit(1); } }
+#define CHECK_ERROR() { GLint err = glGetError(); if(err != GL_NO_ERROR) { printf("Error %d (0x%x) at %s:%d\n", err, err, __FILE__, __LINE__); exit(1); } }
 #define CHECK_GL_CALL(expr) expr; CHECK_ERROR()
 
 #define CHECK_SHADER_ERROR(handle) { GLint compileSuccess = 0; glGetShaderiv(handle, GL_COMPILE_STATUS, &compileSuccess); if(!compileSuccess) { GLchar messages[256]; glGetShaderInfoLog(handle, sizeof(messages), 0, &messages[0]); printf("Shader compile error at %s:%d: %s\n", __FILE__, __LINE__, messages); exit(1); } }
 #define CHECK_LINK_ERROR(handle) { GLint compileSuccess = 0; glGetProgramiv(handle, GL_LINK_STATUS, &compileSuccess); if(!compileSuccess) { GLchar messages[256]; glGetProgramInfoLog(handle, sizeof(messages), 0, &messages[0]); printf("Shader link error at %s:%d: %s\n", __FILE__, __LINE__, messages); exit(1); } }
+
+#ifdef TARGET_RPI
+#define FONT_CLAMP GL_CLAMP_TO_EDGE
+#else
+#define FONT_CLAMP GL_CLAMP_TO_BORDER
+#endif
 
 double getCurrentTime(void)
 {
@@ -230,15 +259,14 @@ void SetupString(Vertex* vertexBuf, Font* font, int* charIndices, int nCols, int
 
 double gTime = 0;
 
-void warp(float& x, float& y)
+void warp(float& x, float& y, float amt)
 {
     float ox = x;
     float oy = y;
     //float d = sqrtf(ox*ox+oy*oy);
     float d = (ox*ox*oy*oy);
-    const float warpAmt = 0.04f;
-    x = ox + ox * d * -warpAmt;
-    y = oy + oy * d * -warpAmt;
+    x = ox + ox * d * -amt;
+    y = oy + oy * d * -amt;
 }
 
 struct screenGrid
@@ -250,7 +278,7 @@ struct screenGrid
     Vertex* jitterVector;
 };
 
-void screenGrid_init(screenGrid* g, int width, int height)
+void screenGrid_init(screenGrid* g, int width, int height, float warpAmt)
 {
     g->width = width;
     g->height = height;
@@ -276,8 +304,8 @@ void screenGrid_init(screenGrid* g, int width, int height)
             float jfy = fy;
 
             //float d = sqrtf(ox*ox+oy*oy);
-            warp(fx, fy);
-            warp(jfx, jfy);
+            warp(fx, fy, warpAmt);
+            warp(jfx, jfy, warpAmt);
 
             Vertex& orig = g->origPoints[y*g->width+x];
             Vertex& dyn = g->dynamicPoints[y*g->width+x];
@@ -307,7 +335,7 @@ void screenGrid_update(screenGrid* g, Vertex* vertexBuf, float ox, float oy, flo
             const Vertex& jit = g->jitterVector[y*g->width+x];
             Vertex& dyn = g->dynamicPoints[y*g->width+x];
 
-            float jitAmt = sinf(y*0.3f + gTime*15.f) * 0.5f + (rand()%100)*0.035f;
+            float jitAmt = sinf(y*0.3f + gTime*15.f) * 0.5f + (rand()%100)*0.01f;
 
             dyn.x = ox + (orig.x + jit.x * jitAmt) * w;
             dyn.y = oy + (orig.y + jit.y * jitAmt) * h;
@@ -369,6 +397,7 @@ void screenGrid_update(screenGrid* g, Vertex* vertexBuf, float ox, float oy, flo
 
 // }
 
+#ifndef TARGET_RPI
 void myGlfwErrorCB(int error, const char* description)
 {
     fputs(description, stderr);
@@ -383,6 +412,7 @@ void myGlfwKeyCB(GLFWwindow* window, int key, int scancode, int action, int mods
         glfwSetWindowShouldClose(window, GL_TRUE);
     }
 }
+#endif
 
 void compileShader(const char* vertexSrc, const char* fragmentSrc, GLuint* retProgram)
 {
@@ -406,14 +436,17 @@ void compileShader(const char* vertexSrc, const char* fragmentSrc, GLuint* retPr
 
 #define SHADER_LINE(x)  x "\n"
 
+
 static const char* vs_source =
 //SHADER_LINE( "#version 110 core" )
 SHADER_LINE( "attribute vec2 Position;" )
 SHADER_LINE( "attribute vec2 TexCoord;" )
+SHADER_LINE( "varying vec2 TexCoordVar;" ) // was: gl_TexCoord[0]
 SHADER_LINE( "void main(void) {" )
 SHADER_LINE( "    gl_Position = vec4(Position.x,-Position.y,0,1);" )
-SHADER_LINE( "    gl_TexCoord[0] = vec4(TexCoord.x,1.-TexCoord.y,0,0);" )
+SHADER_LINE( "    TexCoordVar = vec2(TexCoord.x,1.-TexCoord.y);" )
 SHADER_LINE( "}" );
+
 
 static const char* fs_source_ghost =
 //SHADER_LINE( "#version 110 core" )
@@ -421,10 +454,13 @@ SHADER_LINE( "uniform sampler2D tex;" )
 SHADER_LINE( "uniform vec4 color;" )
 SHADER_LINE( "uniform float ghostDist;" )
 SHADER_LINE( "uniform float ghostAmt;" )
+//#ifdef TARGET_RPI
+SHADER_LINE( "varying vec2 TexCoordVar;" )
+//#endif
 SHADER_LINE( "void main(void) {" )
-SHADER_LINE( "    vec4 s1 = texture2D(tex, gl_TexCoord[0].xy);" )
-SHADER_LINE( "    vec4 s2 = texture2D(tex, gl_TexCoord[0].xy + vec2(-ghostDist,0.0));" )
-SHADER_LINE( "    vec4 s3 = texture2D(tex, gl_TexCoord[0].xy + vec2(-ghostDist*2.,0.0));" )
+SHADER_LINE( "    vec4 s1 = texture2D(tex, TexCoordVar);" )
+SHADER_LINE( "    vec4 s2 = texture2D(tex, TexCoordVar + vec2(-ghostDist,0.0));" )
+SHADER_LINE( "    vec4 s3 = texture2D(tex, TexCoordVar + vec2(-ghostDist*2.,0.0));" )
 SHADER_LINE( "    gl_FragColor = (s1 + (s2 + s3*0.3)*ghostAmt) * color;" )
 //SHADER_LINE( "    gl_FragColor = vec4(1,1,1,1);" )
 SHADER_LINE( "}" );
@@ -435,8 +471,11 @@ SHADER_LINE( "uniform sampler2D tex;" )
 SHADER_LINE( "uniform vec4 color;" )
 SHADER_LINE( "uniform float ghostDist;" )
 SHADER_LINE( "uniform float ghostAmt;" )
+//#ifdef TARGET_RPI
+SHADER_LINE( "varying vec2 TexCoordVar;" )
+//#endif
 SHADER_LINE( "void main(void) {" )
-SHADER_LINE( "    vec4 s1 = texture2D(tex, gl_TexCoord[0].xy);" )
+SHADER_LINE( "    vec4 s1 = texture2D(tex, TexCoordVar);" )
 SHADER_LINE( "    gl_FragColor = s1 * color;" )
 //SHADER_LINE( "    gl_FragColor = vec4(1,1,1,1);" )
 SHADER_LINE( "}" );
@@ -536,11 +575,18 @@ void renderTarget_initFBO(renderTarget* r, GLuint width, GLuint height)
     CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, 0) );
     CHECK_GL_CALL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR) );
     CHECK_GL_CALL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST) );
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, FONT_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, FONT_CLAMP);
+#ifdef TARGET_RPI
+    CHECK_GL_CALL( glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, r->tex, 0) );
+    //CHECK_GL_CALL( glDrawBuffer(GL_COLOR_ATTACHMENT0) );
+#else
     CHECK_GL_CALL( glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, r->tex, 0) );
     GLenum drawBufs[1] = {GL_COLOR_ATTACHMENT0};
     CHECK_GL_CALL( glDrawBuffers(1, drawBufs) );
+#endif
+    
+    
     if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
     {
         printf("Failed to setup render buffer\n");
@@ -603,8 +649,31 @@ const int kLineChars[] = {
     _CH(13,7),
 };
 
-void updateChars(int* charIndices, int rows, int cols)
+#ifdef USE_USB_SERIAL
+void updateCharsFromUSB(int* charIndices, int rows, int cols)
 {
+#define CHAR_AT(_r,_c) charIndices[(_r)*cols+(_c)]
+    usbSerialDecoder_frameData data;
+    if(!frameReadThread_getNewFrame(&data))
+    {
+        return;
+    }
+    int maxRows = rows > USBSERIALDECODER_NROWS ? USBSERIALDECODER_NROWS : rows;
+    int maxCols = cols > USBSERIALDECODER_NCOLS ? USBSERIALDECODER_NCOLS : cols;
+    bool isGraphic = data.flags_buffer[0] != 0;
+    for(int r = 0; r < maxRows; r++)
+    {
+        for(int c = 0; c < maxCols; c++)
+        {
+            charIndices[r*cols+c] = data.frame_buffer[r][c];
+        }
+    }
+}
+#endif
+
+void updateCharsDemo(int* charIndices, int rows, int cols)
+{
+    //printf("%p\n", charIndices);
 #define CHAR_AT(_r,_c) charIndices[(_r)*cols+(_c)]
     static int mode = 0;
     static int charSetLimit = 64;
@@ -614,15 +683,15 @@ void updateChars(int* charIndices, int rows, int cols)
 
     const double now = getCurrentTime();
 
-    if((now - lastUpdateTime) < (1./30))
-    {
-        return;
-    }
+    // if((now - lastUpdateTime) < (1./30))
+    // {
+    //     return;
+    // }
 
     lastUpdateTime = now;
     ++tick;
 
-#if 1
+#if 0
     if(rand()%100 == 0)
     {
         //clearChars(charIndices, rows, cols, BLANK_CHAR);
@@ -644,7 +713,9 @@ void updateChars(int* charIndices, int rows, int cols)
             cur_c = (cur_c+rand()%3-1)%cols;
             cur_r = (cur_r+rand()%3-1)%rows;
             //CHAR_AT(cur_r,cur_c) = (CHAR_AT(cur_r,cur_c)+rand()%5) % 0x100;
-            CHAR_AT(cur_r,cur_c) = kLineChars[rand()%(sizeof(kLineChars)/sizeof(kLineChars[0]))];
+            unsigned int ridx = rand();
+            unsigned int ridx2 = ridx%(sizeof(kLineChars)/sizeof(kLineChars[0]));
+            CHAR_AT(cur_r,cur_c) = kLineChars[ridx2];
         }
         for(int n = 0; n < 1000; n++)
         {
@@ -729,26 +800,82 @@ void updateChars(int* charIndices, int rows, int cols)
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
   // Initialize GLFW, and if it fails to initialize for any reason, print it out to STDERR.
+#ifdef TARGET_RPI
+    if(rpi_egl_init() < 0)
+    {
+        fprintf(stderr, "Failed to initialize EGL.\n");
+        exit(EXIT_FAILURE);   
+    }
+#else
     if (!glfwInit())
     {
-        fprintf(stderr, "Failed initialize GLFW.");
+        fprintf(stderr, "Failed to initialize GLFW.");
         exit(EXIT_FAILURE);
     }
+#endif
 
     const int screenW = SCREEN_W;
     const int screenH = SCREEN_H;
 
-    const int cols = 40;
-    const int rows = 25;
-    const int charPixW = 32;
-    const int charPixH = 32;
+    const int phosphorLayerW = PHOSPHORLAYER_W;
+    const int phosphorLayerH = PHOSPHORLAYER_H;
+
+    const int cols = CHAR_COLS;
+    const int rows = CHAR_ROWS;
+    const int charPixW = 21;
+    const int charPixH = 31;
 
     const int virtScreenW = cols * charPixW;
     const int virtScreenH = rows * charPixH;
 
+    bool useGhostShader = false;
+    bool demo = false;
+    int glowLevel = 0;
+    bool doScan = false;
+    bool doBackground = false;
+
+    --argc;
+    ++argv;
+
+    while(argc > 0)
+    {
+        if(strcmp(*argv, "--demo") == 0)
+        {
+            demo = true;
+        }
+        else if(strcmp(*argv, "--ghost") == 0)
+        {
+            useGhostShader = true;
+        }
+        else if(strcmp(*argv, "--glow=1") == 0)
+        {
+            glowLevel = 1;
+        }
+        else if(strcmp(*argv, "--glow=1") == 0)
+        {
+            glowLevel = 2;
+        }
+        else if(strcmp(*argv, "--scan") == 0)
+        {
+            doScan = true;
+        }
+        else if(strcmp(*argv, "--bg") == 0)
+        {
+            doBackground = true;
+        }
+        else
+        {
+            printf("Unrecognized option %s\n", *argv);
+        }
+
+        --argc;
+        ++argv;        
+    }
+
+#ifndef TARGET_RPI
     glfwSetErrorCallback(myGlfwErrorCB);
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
@@ -781,7 +908,7 @@ int main()
 
     glewExperimental = GL_TRUE;
     glewInit();
-
+#endif
 
 
 
@@ -808,7 +935,7 @@ int main()
 
     const int maxQuads = rows * cols;
 
-    GLuint quadIndices[6*maxQuads];
+    GLushort quadIndices[6*maxQuads];
     Vertex vertexBuf[4*maxQuads];
 
     for(int n = 0; n < maxQuads; n++)
@@ -858,10 +985,12 @@ int main()
     GLuint fontTex;
     CHECK_GL_CALL( glGenTextures(1, &fontTex) );
     CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, FONT_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, FONT_CLAMP);
     CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, font.tga.imageWidth, font.tga.imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, font.tga.imageData) );
     //CHECK_GL_CALL( glGenerateMipmap(GL_TEXTURE_2D) );
 
@@ -870,9 +999,9 @@ int main()
     CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, bgTexID) );
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, bgTga.imageWidth, bgTga.imageHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, bgTga.imageData) );
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, FONT_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, FONT_CLAMP);
+    CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, bgTga.imageWidth, bgTga.imageHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, bgTga.imageData) );
 
     GLuint scanTexID;
     CHECK_GL_CALL( glGenTextures(1, &scanTexID) );
@@ -891,13 +1020,13 @@ int main()
 
     renderTarget_initScreen(&screen, screenW, screenH);
     renderTarget_initFBO(&virtScreen, virtScreenW, virtScreenH);
-    renderTarget_initFBO(&phosphorLayer, screenW, screenH);
-    renderTarget_initFBO(&phosphorLayer2, screenW/4, screenH/4);
-    renderTarget_initFBO(&phosphorLayer3, screenW/24, screenH/24);
+    renderTarget_initFBO(&phosphorLayer, phosphorLayerW, phosphorLayerH);
+    renderTarget_initFBO(&phosphorLayer2, phosphorLayerW/4, phosphorLayerH/4);
+    renderTarget_initFBO(&phosphorLayer3, phosphorLayerW/24, phosphorLayerH/24);
 
     screenGrid grid;
 
-    screenGrid_init(&grid, 20, 20);
+    screenGrid_init(&grid, 20, 20, 0.02f);
 
     glEnable(GL_BLEND);
 
@@ -905,151 +1034,93 @@ int main()
 
     normalShader_select(&shNorm);
 
+#ifdef USE_USB_SERIAL
+    frameReadThread_init();
+#endif
+
     double lastFrameTime = getCurrentTime();
+    double lastFPSTime = lastFrameTime;
+    int fpsFrames = 0;
     
+#ifdef TARGET_RPI
+    while(1)
+#else
     while(!glfwWindowShouldClose(window))
+#endif
     {
         const double now = getCurrentTime();
         const double frameDelta = (now - lastFrameTime);
         lastFrameTime = now;
         gTime += frameDelta;
 
-        const float tcAdjust = 1.0f; //TODO: adjust time constants
-
-        // for(int r = 0; r < rows; r++)
-        // {
-        //   for(int c = 0; c < cols; c++)
-        //   {
-        //     charIndices[r][c] = rand() % 256;
-        //   }
-        // }
-
-        // for(int r = 0; r < 1; r++)
-        // {
-        //   charIndices[(frameIdx/cols)%rows][frameIdx%cols] = rand()%64;
-        // }
-
-        updateChars(&charIndices[0][0], rows, cols);
-
-        /////////
-
-        renderTarget_bind(&virtScreen);
-
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        SetupString(vertexBuf, &font, &charIndices[0][0], cols, rows, -1., -1., 2., 2.);
-
-        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, 1.f) );
-        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
-        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
-        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*rows*cols, GL_UNSIGNED_INT, 0) );
-
-        const float scanAlpha = 0.08f;
-
-        static float scanOfs = 0.0f;
-        scanOfs += frameDelta * 0.5f * (1.f + (float)(rand()%30)/1000);
-        while(scanOfs > 1.f) scanOfs -= 1.f;
-        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, -scanOfs, 1, 1);
-        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, scanAlpha) );
-        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
-        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, scanTexID) );
-        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
-
-        renderTarget_finalize(&virtScreen);
-
-        /////////
-
-        renderTarget_bind(&phosphorLayer);
-
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        const float flickerA = 0.95f+0.05f*sinf(gTime*100.0f);
-
-#if 1
-        const float fontColorR = 0.3f;
-        const float fontColorG = 1.0f;
-        const float fontColorB = 0.3f;
-#else
-        const float fontColorR = 0.7f;
-        const float fontColorG = 0.8f;
-        const float fontColorB = 1.0f;
-#endif
-
-        ghostShader_select(&shGhost);
-
-        static float driftGhost = 0.0f;
-        driftGhost += (((float)(rand()%100)/100.f) - driftGhost) * 0.3f * tcAdjust;
-        static float driftGhostAmt = 0.0f;
-        driftGhostAmt += (((float)(rand()%100)/100.f) - driftGhostAmt) * 0.2f * tcAdjust;
-        CHECK_GL_CALL( glUniform1f(shGhost.texGhostDist, 0.002f + 0.002f * driftGhost) );
-        CHECK_GL_CALL( glUniform1f(shGhost.texGhostAmt, 0.15f * driftGhostAmt) );
-
+        if((now - lastFPSTime) >= 1.0)
         {
-            const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.73f;
-            const float sqX = (-scale*virtScreen.width)/screen.width;
-            const float sqY = (-scale*virtScreen.height)/screen.height-0.09;
-            const float sqW = (2*scale*virtScreen.width)/screen.width;
-            const float sqH = (2*scale*virtScreen.height)/screen.height*1.2;
-            //SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
-            screenGrid_update(&grid, vertexBuf, sqX, sqY, sqW, sqH, 0, 0, 1, 1);
-            CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-            CHECK_GL_CALL( glUniform4f(shGhost.texColor, fontColorR, fontColorG, fontColorB, 1.f) );
-            CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
-            CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-            CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, virtScreen.tex) );
-            CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*(grid.width-1)*(grid.height-1), GL_UNSIGNED_INT, 0) );
+            float fps = (float)(fpsFrames / (now - lastFPSTime));
+            printf("%.2f FPS\n", fps);
+            lastFPSTime = now;
+            fpsFrames = 0;
         }
 
-        renderTarget_finalize(&phosphorLayer);
+        const float tcAdjust = 1.0f; //TODO: adjust time constants
+
+        if(demo)
+        {
+            updateCharsDemo(&charIndices[0][0], rows, cols);
+        }
+        else
+        {
+            updateCharsFromUSB(&charIndices[0][0], rows, cols);
+        }
 
         /////////
 
-        renderTarget_bind(&phosphorLayer2);
+        // renderTarget_bind(&virtScreen);
 
-        normalShader_select(&shNorm);
+        // glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        // glClear(GL_COLOR_BUFFER_BIT);
 
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        // SetupString(vertexBuf, &font, &charIndices[0][0], cols, rows, -1., -1., 2., 2.);
 
-        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
-        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, 1.0f) );
-        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
-        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
-        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
+        // CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
+        // CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, 1.f) );
+        // CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        // CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        // CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
+        // CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*rows*cols, GL_UNSIGNED_SHORT, 0) );
 
-        renderTarget_finalize(&phosphorLayer2);
+        // renderTarget_finalize(&virtScreen);
 
         /////////
 
-        renderTarget_bind(&phosphorLayer3);
+        const float flickerA = (frameIdx&1) ? 1.0f : 0.97f;
 
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        const float fontColorR = 0.4f;
+        const float fontColorG = 1.0f;
+        const float fontColorB = 0.4f;
 
-        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
-        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, 1.0f) );
-        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
-        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
-        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
+        // if(glowLevel >= 1)
+        // {
+        //     renderTarget_bind(&phosphorLayer2);
 
-        renderTarget_finalize(&phosphorLayer3);
+        //     normalShader_select(&shNorm);
+
+        //     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        //     glClear(GL_COLOR_BUFFER_BIT);
+
+        //     SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+        //     CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
+        //     CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, 1.0f) );
+        //     CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        //     CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        //     CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
+        //     CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0) );
+
+        //     renderTarget_finalize(&phosphorLayer2);
+        // }
 
         /////////
 
         renderTarget_bind(&screen);
-
-        //glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        //glClear(GL_COLOR_BUFFER_BIT);
 
 #ifdef ALTERNATE_GAMMA
         float bgBrightness = 0.3f;
@@ -1061,43 +1132,101 @@ int main()
         float smallGlowAmt = 0.1f;
         float bgPersist = 0.2f;
 
-        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+        if(doBackground)
+        {
+            SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+            CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
+            CHECK_GL_CALL( glUniform4f(shNorm.texColor, bgBrightness, bgBrightness, bgBrightness, 1.f-bgPersist) );
+            CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+            CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+            CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, bgTexID) );
+            CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0) );
+        }
+        else
+        {
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
+
+        // {
+        //     normalShader_select(&shNorm);
+            
+        //     const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.93f; //0.73f;
+        //     const float sqX = (-scale*virtScreen.width)/screen.width;
+        //     const float sqY = (-scale*virtScreen.height)/screen.height-0.09;
+        //     const float sqW = (2*scale*virtScreen.width)/screen.width;
+        //     const float sqH = (2*scale*virtScreen.height)/screen.height*1.2;
+        //     //SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
+        //     screenGrid_update(&grid, vertexBuf, sqX, sqY, sqW, sqH, 0, 0, 1, 1);
+        //     CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
+        //     CHECK_GL_CALL( glUniform4f(shNorm.texColor, fontColorR, fontColorG, fontColorB, 1.f) );
+        //     CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        //     CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        //     CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, virtScreen.tex) );
+        //     CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*(grid.width-1)*(grid.height-1), GL_UNSIGNED_SHORT, 0) );
+        // }
+
+        normalShader_select(&shNorm);
+
+            const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.9;
+            const float sqX = (-scale*virtScreen.width)/screen.width;
+            const float sqY = (-scale*virtScreen.height)/screen.height;
+            const float sqW = (2*scale*virtScreen.width)/screen.width;
+            const float sqH = (2*scale*virtScreen.height)/screen.height;
+
+        SetupString(vertexBuf, &font, &charIndices[0][0], cols, rows, sqX, sqY, sqW, sqH);
+
         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
-        CHECK_GL_CALL( glUniform4f(shNorm.texColor, bgBrightness, bgBrightness, bgBrightness, 1.f-bgPersist) );
+        CHECK_GL_CALL( glUniform4f(shNorm.texColor, fontColorR, fontColorG, fontColorB, 1.f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, bgTexID) );
-        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
+        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*rows*cols, GL_UNSIGNED_SHORT, 0) );
 
-        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
-        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, brightness * 0.7f * flickerA) );
-        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
-        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
-        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
+        // {
+        //     {
+        //         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+        //         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
+        //         CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, brightness * 0.7f * flickerA) );
+        //         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        //         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        //         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer.tex) );
+        //         CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0) );
+        //     }
 
-        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
-        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, brightness * smallGlowAmt) );
-        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
-        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
-        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
+        //     if(glowLevel >= 1)
+        //     {
+        //         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+        //         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
+        //         CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, brightness * smallGlowAmt) );
+        //         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        //         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        //         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer2.tex) );
+        //         CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0) );
+        //     }
 
-        SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
-        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
-        CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, brightness * largeGlowAmt) );
-        CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
-        CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer3.tex) );
-        CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) );
+        //     if(glowLevel >= 2)
+        //     {
+        //         SetupQuad(vertexBuf, -1, -1, 2, 2, 0, 0, 1, 1);
+        //         CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) );
+        //         CHECK_GL_CALL( glUniform4f(shNorm.texColor, 1.f, 1.f, 1.f, brightness * largeGlowAmt) );
+        //         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
+        //         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
+        //         CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, phosphorLayer3.tex) );
+        //         CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0) );
+        //     }
+        // }
 
 
+#ifdef TARGET_RPI
+        rpi_egl_swap();
+#else
         glfwSwapBuffers(window);
         glfwPollEvents();
+#endif
 
         ++frameIdx;
+        ++fpsFrames;
     }
 
     return 0;
