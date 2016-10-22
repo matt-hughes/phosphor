@@ -1,4 +1,3 @@
-#include "usbSerialDecoder.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -7,44 +6,38 @@
 #include <termios.h>
 #include <unistd.h>
 
-#define USB_TTY_PATH  "/dev/ttyUSB0" 
-
 //----------------------------------------------------------------------------------------
- 
-static int open_serial_port(const char* path)
+
+static int open_serial_port()
 {
-  // system("stty -F /dev/ttyUSB0 raw speed 1500000");
-  // sleep(1);
-  // system("stty -F /dev/ttyUSB0 raw speed 1500000");
-  // sleep(1);
-  int fd = open(path, O_RDONLY | O_NOCTTY);
+  const char *portname = "/dev/ttyUSB0";
+
+  int fd = open(portname, O_RDONLY | O_NOCTTY);
   if (fd < 0)
   {
-    fprintf(stderr, "error %d opening %s: %s\n", errno, path, strerror (errno));
-    return -1;
+    fprintf(stderr, "error %d opening %s: %s\n", errno, portname, strerror (errno));
+    exit(1);
   }
- 
-  // struct termios serialOpt;
- 
-  // // all other bits are unset
-  // memset(&serialOpt, 0, sizeof(serialOpt));
-  // tcgetattr(fd, &serialOpt);
-  // serialOpt.c_cflag = CS8 | CLOCAL | CREAD; // 8N1
-  // //serialOpt.c_cc[VTIME] = 0; // timeout between characters in hundreds of ms
-  // //serialOpt.c_cc[VMIN]  = 1; // block reading until 1 character received
-  // cfsetispeed (&serialOpt, 2000000);
- 
-  // tcflush(fd, TCIFLUSH);
- 
-  // if (tcsetattr(fd, TCSANOW, &serialOpt) != 0)
-  // {
-  //   fprintf(stderr, "error %d setting tty attributes\n", errno);
-  //   return -1;
-  // }
-  
+
+  struct termios serialOpt;
+
+  // all other bits are unset
+  memset(&serialOpt, 0, sizeof(serialOpt));
+  serialOpt.c_cflag = B2000000 | CS8 | CLOCAL | CREAD; // 8N1
+  serialOpt.c_cc[VTIME] = 0; // timeout between characters in hundreds of ms
+  serialOpt.c_cc[VMIN]  = 1; // block reading until 1 character received
+  //cfsetispeed (&serialOpt, B2000000);
+
+  tcflush(fd, TCIFLUSH);
+
+  if (tcsetattr(fd, TCSANOW, &serialOpt) != 0)
+  {
+    fprintf(stderr, "error %d setting tty attributes\n", errno);
+    exit(1);
+  }
   return fd;
 }
- 
+
 //----------------------------------------------------------------------------------------
 // base64 decoding
 //
@@ -75,8 +68,8 @@ static int open_serial_port(const char* path)
 //      15 P        32 g        49 x
 //      16 Q        33 h        50 y
 //
- 
-static const unsigned char base64_to_binary[256] = {
+
+unsigned char base64_to_binary[256] = {
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63,
@@ -95,59 +88,68 @@ static const unsigned char base64_to_binary[256] = {
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 };
 
-#define ENCODED_LINE_SZ (((USBSERIALDECODER_NCOLS+1)*4)/3)
- 
-static int decode_base64_buffer(unsigned char inbuf[ENCODED_LINE_SZ], unsigned char outbuf[USBSERIALDECODER_NCOLS+1])
+static int decode_base64_buffer(unsigned char inbuf[108], unsigned char outbuf[81])
 {
   int iin  = 0;
   int iout = 0;
- 
-  while (iin < ENCODED_LINE_SZ)
+
+  while (iin < 108)
   {
     unsigned char b0 = base64_to_binary[inbuf[iin++]];
     unsigned char b1 = base64_to_binary[inbuf[iin++]];
     unsigned char b2 = base64_to_binary[inbuf[iin++]];
     unsigned char b3 = base64_to_binary[inbuf[iin++]];
- 
+
     if (b0 == -1 || b1 == -1 || b2 == -1 || b3 == -1)
     {
       return 0;
     }
- 
+
     outbuf[iout++] = ( b0         << 2) | (b1 >> 4);
     outbuf[iout++] = ((b1 & 0x0F) << 4) | (b2 >> 2);
     outbuf[iout++] = ((b2 & 0x03) << 6) |  b3;
   }
   return 1;
 }
- 
+
 //----------------------------------------------------------------------------------------
- 
-static usbSerialDecoder_frameData gCurFrame;
+
+static unsigned char display_buffer[25][81];
+static unsigned char flags_buffer[80];
 static unsigned char next_line = 0;
- 
-static unsigned char received_line(unsigned char inbuf[ENCODED_LINE_SZ])
+
+static void received_frame()
 {
-  unsigned char have_full_buffer = 0;
-  unsigned char decoded_line[USBSERIALDECODER_NCOLS+1];
- 
+  fprintf(stdout, "\033[H");
+  for (int line = 0; line < 25; line++)
+  {
+    fprintf(stdout, "%s\n", display_buffer[line]);
+  }
+  fprintf(stdout, "%s\n", flags_buffer[0] ? "graphic" : "text   ");
+  fflush(stdout);
+}
+
+static void received_line(unsigned char inbuf[108])
+{
+  unsigned char decoded_line[81];
+
   if (decode_base64_buffer(inbuf, decoded_line))
   {
     unsigned char line = decoded_line[0];
     if (line == next_line)
     {
-      if (next_line < USBSERIALDECODER_NROWS)
+      if (next_line < 25)
       {
-        memcpy(gCurFrame.frame_buffer[next_line], decoded_line + 1, USBSERIALDECODER_NCOLS);
+        memcpy(display_buffer[next_line], decoded_line + 1, 80);
       }
       else
       {
-        memcpy(gCurFrame.flags_buffer, decoded_line + 1, USBSERIALDECODER_NCOLS);
+        memcpy(flags_buffer, decoded_line + 1, 80);
       }
       next_line++;
-      if (next_line == (USBSERIALDECODER_NROWS+1))
+      if (next_line == 26)
       {
-        have_full_buffer = 1;
+        received_frame();
         next_line = 0;
       }
     }
@@ -156,107 +158,50 @@ static unsigned char received_line(unsigned char inbuf[ENCODED_LINE_SZ])
       next_line = 0; // skip incomplete frames
     }
   }
-
-  return have_full_buffer;
 }
 
-static unsigned char inbuf[ENCODED_LINE_SZ];
-static int iin = 0;
-
-static unsigned char process_byte(char byte)
-{
-  unsigned char have_full_buffer = 0;
-  if(byte == '\r')
-  {
-    return 0;
-  }
-  if (byte == '\n') // don't make assumptions on line ending
-  {
-    //printf("got line with sz = %d\n", iin);
-    if (iin == ENCODED_LINE_SZ)
-    {
-      have_full_buffer = received_line(inbuf);
-    }
-    iin = 0;
-  }
-  else
-  {
-    if (iin < ENCODED_LINE_SZ)
-    {
-      inbuf[iin] = byte;
-    }
-    iin++;
-  }
-  return have_full_buffer;
-}
-
-static void init_buffers(void)
-{
-  int line;
-  iin = 0;
-  next_line = 0;
-  for (line = 0; line < USBSERIALDECODER_NROWS; line++)
-  {
-    memset(gCurFrame.frame_buffer[line], ' ', USBSERIALDECODER_NCOLS);
-    gCurFrame.frame_buffer[line][USBSERIALDECODER_NCOLS] = '\0';
-  }
-  memset(gCurFrame.flags_buffer, 0, USBSERIALDECODER_NCOLS);
-}
- 
 //----------------------------------------------------------------------------------------
 
-static int gUSBSerialFD = -1;
-static int gUSBSerialValid = 0;
-
-int usbSerialDecoder_open(void)
+int main(int argc, char*argv[])
 {
-  if(gUSBSerialFD >= 0)
-  {
-    close(gUSBSerialFD);
-  }
-  gUSBSerialValid = 0;
-  gUSBSerialFD = open_serial_port(USB_TTY_PATH);
-  if(gUSBSerialFD < 0)
-  {
-    return -1;
-  }
-  else
-  {
-    gUSBSerialValid = 1;
-    init_buffers();
-    return 0;
-  }
-}
+  int fd = open_serial_port();
 
-void usbSerialDecoder_close(void)
-{
-  close(gUSBSerialFD);
-  gUSBSerialFD = -1;
-}
+  for (int line = 0; line < 25; line++)
+  {
+    memset(display_buffer[line], ' ', 80);
+    display_buffer[line][80] = '\0';
+  }
+  memset(flags_buffer, 0, 80);
 
-int usbSerialDecoder_readFrame(usbSerialDecoder_frameData* frame)
-{
-  //printf("usbSerialDecoder_readFrame\n");
+  unsigned char inbuf[108];
+  int iin = 0;
+
   while (1)
   {
-    const int maxBytes = 1;
-    unsigned char bytes[maxBytes];
-    //printf("Reading Byte...\n");
-    int n = read(gUSBSerialFD, bytes, maxBytes);
-    //printf("Read returned %d with %02X\n", n, bytes[0]);
+    unsigned char byte;
+    int n = read(fd, &byte, 1);
     if (n != 1)
     {
       fprintf(stderr, "read failed\n");
-      gUSBSerialValid = 0;
-      return -1;
+      exit(1);
     }
-    if(process_byte(bytes[0]))
+    if (byte == '\n' || byte == '\r') // don't make assumptions on line ending
     {
-      //printf("Got frame\n");
-      memcpy(frame, &gCurFrame, sizeof(usbSerialDecoder_frameData));
-      return 1;
+      if (iin == 108)
+      {
+        received_line(inbuf);
+      }
+      iin = 0;
+    }
+    else
+    {
+      if (iin < 108)
+      {
+        inbuf[iin] = byte;
+      }
+      iin++;
     }
   }
 }
- 
-//[END]
+
+// eof

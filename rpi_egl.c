@@ -9,7 +9,7 @@ EGLDisplay display;
 EGLContext context;
 EGLSurface surface;
 
-int rpi_egl_init()
+int rpi_egl_init(int screenW, int screenH)
 {
     static EGL_DISPMANX_WINDOW_T nativewindow;
 
@@ -32,9 +32,11 @@ int rpi_egl_init()
         return -1;
     }
 
+    printf("Display size: %d x %d\n", display_width, display_height);
+
     // You can hardcode the resolution here:
-    display_width = 1280;
-    display_height = 720;
+    display_width = screenW;
+    display_height = screenH;
 
     dst_rect.x = 0;
     dst_rect.y = 0;

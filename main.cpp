@@ -3,7 +3,7 @@
 #include <string.h>
 #ifdef TARGET_RPI
 #include <GLES2/gl2.h>
-extern "C" int rpi_egl_init(void);
+extern "C" int rpi_egl_init(int screenW, int screenH);
 extern "C" int rpi_egl_swap(void);
 #else
 #include <GL/glew.h>
@@ -18,6 +18,8 @@ extern "C" int rpi_egl_swap(void);
 #ifdef USE_USB_SERIAL
 #include "frameReadThread.h"
 #endif
+
+#define NUM_FONTS 2
 
 #define FULLSCREEN
 #ifdef TARGET_RPI
@@ -131,9 +133,21 @@ typedef struct
     TGAFILE tga;
     int nRows;
     int nCols;
+    float glyphTotalSizeW;
+    float glyphTotalSizeH;
+    float glyphOfsX;
+    float glyphOfsY;
+    float glyphStrideX;
+    float glyphStrideY;
+    float adjustFactorX;
+    float adjustFactorY;
+    float adjustFactorW;
+    float adjustFactorH;
+    float spaceFactorX;
+    float spaceFactorY;
 } Font;
 
-bool LoadFont(Font* font, const char* imgFile, int nRows, int nCols)
+bool LoadFont(Font* font, const char* imgFile, int nRows, int nCols, const char* cfgStr)
 {
     if(!LoadTGAFile(imgFile, &font->tga))
     {
@@ -144,7 +158,57 @@ bool LoadFont(Font* font, const char* imgFile, int nRows, int nCols)
     font->nRows = nRows;
     font->nCols = nCols;
 
-    font->tga.imageWidth;
+    int glyphOfsX_i = 0;
+    int glyphOfsY_i = 0;
+    int glyphTotalSizeW_i = font->tga.imageWidth / nCols;
+    int glyphTotalSizeH_i = font->tga.imageHeight / nRows;
+    int glyphStrideX_i = glyphTotalSizeW_i;
+    int glyphStrideY_i = glyphTotalSizeH_i;
+    int glyphLayoutX1_i = 0;
+    int glyphLayoutY1_i = 0;
+    int glyphLayoutX2_i = glyphTotalSizeW_i;
+    int glyphLayoutY2_i = glyphTotalSizeH_i;
+    int spaceX_i = 0;
+    int spaceY_i = 0;
+
+    if(cfgStr)
+    {
+        if(sscanf(cfgStr, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+            &glyphOfsX_i,
+            &glyphOfsY_i,
+            &glyphTotalSizeW_i,
+            &glyphTotalSizeH_i,
+            &glyphStrideX_i,
+            &glyphStrideY_i,
+            &glyphLayoutX1_i,
+            &glyphLayoutY1_i,
+            &glyphLayoutX2_i,
+            &glyphLayoutY2_i) != 10)
+        {
+            printf("Failed to parse font config str '%s'\n", cfgStr);
+            printf("Format is ofsX,ofsY,glyphW,glyphH,strideX,strideY,left,top,right,bottom\n");
+            return false;
+        }
+        if(glyphLayoutX2_i < 0) glyphLayoutX2_i = glyphTotalSizeW_i + glyphLayoutX2_i;
+        if(glyphLayoutY2_i < 0) glyphLayoutY2_i = glyphTotalSizeH_i + glyphLayoutY2_i;
+    }
+
+    const int glyphLayoutW = glyphLayoutX2_i - glyphLayoutX1_i;
+    const int glyphLayoutH = glyphLayoutY2_i - glyphLayoutY1_i;
+    const float scaleX = 1.f / font->tga.imageWidth;
+    const float scaleY = 1.f / font->tga.imageHeight;
+    font->glyphTotalSizeW = glyphTotalSizeW_i * scaleX;
+    font->glyphTotalSizeH = glyphTotalSizeH_i * scaleY;
+    font->glyphOfsX = glyphOfsX_i * scaleX;
+    font->glyphOfsY = glyphOfsY_i * scaleY;
+    font->glyphStrideX = glyphStrideX_i * scaleX;
+    font->glyphStrideY = glyphStrideY_i * scaleY;
+    font->adjustFactorX = -(float)glyphLayoutX1_i / glyphLayoutW;
+    font->adjustFactorY = -(float)glyphLayoutY1_i / glyphLayoutH;
+    font->adjustFactorW = (float)glyphTotalSizeW_i / glyphLayoutW;
+    font->adjustFactorH = (float)glyphTotalSizeH_i / glyphLayoutH;
+    font->spaceFactorX = (float)spaceX_i / glyphLayoutW;
+    font->spaceFactorY = (float)spaceY_i / glyphLayoutH;
 
     return true;
 }
@@ -236,24 +300,30 @@ void SetupGlyph(Vertex* vertexBuf, Font* font, int charIdx, float x, float y, fl
 {
     const int col = charIdx % font->nCols;
     const int row = charIdx / font->nCols;
-    const float tw = (1.0f / font->nCols);
-    const float th = (1.0f / font->nRows);
-    const float tx = col * tw;
-    const float ty = row * th;
-    const float pi = 0.00f;
-    const float tix = 16.f/17;
-    const float tiy = 24.f/25;
-    SetupQuad(vertexBuf, x+pi, y+pi, w-pi*2, h-pi*2, tx, ty, tw*tix, th*tiy);
+    const float tx = font->glyphOfsX + font->glyphStrideX * col;
+    const float ty = font->glyphOfsY + font->glyphStrideY * row;
+    const float tw = font->glyphTotalSizeW;
+    const float th = font->glyphTotalSizeH;
+    const float dx = x + w * font->adjustFactorX;
+    const float dy = y + h * font->adjustFactorY;
+    const float dw = w * font->adjustFactorW;
+    const float dh = h * font->adjustFactorH;
+    // const float tix = 16.f/17;
+    // const float tiy = 24.f/25;
+    SetupQuad(vertexBuf, dx, dy, dw, dh, tx, ty, tw, th);
 }
 
 void SetupString(Vertex* vertexBuf, Font* font, int* charIndices, int nCols, int nRows, float x, float y, float w, float h)
 {
     const int nChars = nCols * nRows;
-    const float charW = w / nCols;
-    const float charH = h / nRows;
+    const float strideX = w / nCols;
+    const float strideY = h / nRows;
+    const float charW = strideX;// * (1.f - font->spaceFactorX);
+    const float charH = strideY;// * (1.f - font->spaceFactorY);
+
     for(int n = 0; n < nChars; n++)
     {
-        SetupGlyph(&vertexBuf[n*4], font, charIndices[n], x+charW*(n%nCols), y+charH*(n/nCols), charW, charH);
+        SetupGlyph(&vertexBuf[n*4], font, charIndices[n], x+strideX*(n%nCols), y+strideY*(n/nCols), charW, charH);
     }
 }
 
@@ -650,7 +720,7 @@ const int kLineChars[] = {
 };
 
 #ifdef USE_USB_SERIAL
-void updateCharsFromUSB(int* charIndices, int rows, int cols)
+void updateCharsFromUSB(int* charIndices, int rows, int cols, int* pActiveFont)
 {
 #define CHAR_AT(_r,_c) charIndices[(_r)*cols+(_c)]
     usbSerialDecoder_frameData data;
@@ -668,10 +738,12 @@ void updateCharsFromUSB(int* charIndices, int rows, int cols)
             charIndices[r*cols+c] = data.frame_buffer[r][c];
         }
     }
+
+    *pActiveFont = isGraphic ? 1 : 0;
 }
 #endif
 
-void updateCharsDemo(int* charIndices, int rows, int cols)
+void updateCharsDemo(int* charIndices, int rows, int cols, int* pActiveFont)
 {
     //printf("%p\n", charIndices);
 #define CHAR_AT(_r,_c) charIndices[(_r)*cols+(_c)]
@@ -683,13 +755,15 @@ void updateCharsDemo(int* charIndices, int rows, int cols)
 
     const double now = getCurrentTime();
 
-    // if((now - lastUpdateTime) < (1./30))
-    // {
-    //     return;
-    // }
+    if((now - lastUpdateTime) < (1./30))
+    {
+        return;
+    }
 
     lastUpdateTime = now;
     ++tick;
+
+    if(rand()%10 == 0) *pActiveFont = 1 - *pActiveFont;
 
 #if 0
     if(rand()%100 == 0)
@@ -804,11 +878,6 @@ int main(int argc, char** argv)
 {
   // Initialize GLFW, and if it fails to initialize for any reason, print it out to STDERR.
 #ifdef TARGET_RPI
-    if(rpi_egl_init() < 0)
-    {
-        fprintf(stderr, "Failed to initialize EGL.\n");
-        exit(EXIT_FAILURE);   
-    }
 #else
     if (!glfwInit())
     {
@@ -817,11 +886,11 @@ int main(int argc, char** argv)
     }
 #endif
 
-    const int screenW = SCREEN_W;
-    const int screenH = SCREEN_H;
+    int screenW = SCREEN_W;
+    int screenH = SCREEN_H;
 
-    const int phosphorLayerW = PHOSPHORLAYER_W;
-    const int phosphorLayerH = PHOSPHORLAYER_H;
+    int phosphorLayerW = PHOSPHORLAYER_W;
+    int phosphorLayerH = PHOSPHORLAYER_H;
 
     const int cols = CHAR_COLS;
     const int rows = CHAR_ROWS;
@@ -836,12 +905,24 @@ int main(int argc, char** argv)
     int glowLevel = 0;
     bool doScan = false;
     bool doBackground = false;
+    const char* fontCfgStr[NUM_FONTS] = { NULL, NULL };
+    const char* fontFiles[NUM_FONTS] = {
+        "PetASCII4_mono.tga",
+        "PetASCII4_mono.tga"
+    };
+    float screenScaleX = 1.f;
+    float screenScaleY = 1.f;
+    float fontColorR = 0.4f;
+    float fontColorG = 1.0f;
+    float fontColorB = 0.4f;
+    int tmpIdx;
 
     --argc;
     ++argv;
 
     while(argc > 0)
     {
+        tmpIdx = 0;
         if(strcmp(*argv, "--demo") == 0)
         {
             demo = true;
@@ -866,6 +947,89 @@ int main(int argc, char** argv)
         {
             doBackground = true;
         }
+        else if(sscanf(*argv, "--font%d", &tmpIdx) == 1)
+        {
+            if(argc >= 2)
+            {
+                --argc;
+                ++argv;
+                fontFiles[tmpIdx-1] = *argv;
+            }
+            else
+            {
+                printf("No font file supplied!\n");
+            }
+        }
+        else if(sscanf(*argv, "--fontLayout%d", &tmpIdx) == 1)
+        {
+            if(argc >= 2)
+            {
+                --argc;
+                ++argv;
+                fontCfgStr[tmpIdx-1] = *argv;
+            }
+            else
+            {
+                printf("No font layout supplied!\n");
+            }
+        }
+        else if(strcmp(*argv, "--fontColor") == 0)
+        {
+            int ir, ig, ib;
+            if(argc >= 2)
+            {
+                --argc;
+                ++argv;
+                if(sscanf(*argv, "%d,%d,%d", &ir, &ig, &ib) != 3)
+                {
+                    printf("Failed to parse font color!\n");
+                }
+                else
+                {
+                    fontColorR = (float)ir / 255;
+                    fontColorG = (float)ig / 255;
+                    fontColorB = (float)ib / 255;
+                }
+            }
+            else
+            {
+                printf("No font layout supplied!\n");
+            }
+        }
+        else if(strcmp(*argv, "--scale") == 0)
+        {
+            if(argc >= 2)
+            {
+                --argc;
+                ++argv;
+                if(sscanf(*argv, "%f,%f", &screenScaleX, &screenScaleY) != 2)
+                {
+                    printf("Failed to parse screen scale!\n");
+                }
+            }
+            else
+            {
+                printf("No scale supplied!\n");
+            }
+        }
+        else if(strcmp(*argv, "--res") == 0)
+        {
+            if(argc >= 2)
+            {
+                --argc;
+                ++argv;
+                if(sscanf(*argv, "%d,%d", &screenW, &screenH) != 2)
+                {
+                    printf("Failed to parse screen res!\n");
+                }
+                phosphorLayerW = screenW;
+                phosphorLayerH = screenH;
+            }
+            else
+            {
+                printf("No res supplied!\n");
+            }
+        }
         else
         {
             printf("Unrecognized option %s\n", *argv);
@@ -874,6 +1038,14 @@ int main(int argc, char** argv)
         --argc;
         ++argv;        
     }
+
+#ifdef TARGET_RPI
+    if(rpi_egl_init(screenW, screenH) < 0)
+    {
+        fprintf(stderr, "Failed to initialize EGL.\n");
+        exit(EXIT_FAILURE);   
+    }
+#endif
 
 #ifndef TARGET_RPI
     glfwSetErrorCallback(myGlfwErrorCB);
@@ -959,11 +1131,15 @@ int main(int argc, char** argv)
     CHECK_GL_CALL( glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer) );
     CHECK_GL_CALL( glBufferData(GL_ARRAY_BUFFER, sizeof(vertexBuf), vertexBuf, GL_DYNAMIC_DRAW) );
 
-    Font font;
-    if(!LoadFont(&font, "PetASCII4_mono.tga", 16, 16))
+    Font fonts[NUM_FONTS];
+
+    for(int n = 0; n < NUM_FONTS; n++)
     {
-        printf("Failed to load font file!\n");
-        exit(1);
+        if(!LoadFont(&fonts[n], fontFiles[n], 16, 16, fontCfgStr[n]))
+        {
+            printf("Failed to load font file!\n");
+            exit(1);
+        }
     }
 
     TGAFILE bgTga;
@@ -982,17 +1158,22 @@ int main(int argc, char** argv)
 
     CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
 
-    GLuint fontTex;
-    CHECK_GL_CALL( glGenTextures(1, &fontTex) );
-    CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, FONT_CLAMP);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, FONT_CLAMP);
-    CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, font.tga.imageWidth, font.tga.imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, font.tga.imageData) );
-    //CHECK_GL_CALL( glGenerateMipmap(GL_TEXTURE_2D) );
+    int activeFont = 0;
+
+    GLuint fontTex[NUM_FONTS];
+    for(int n = 0; n < NUM_FONTS; n++)
+    {
+        CHECK_GL_CALL( glGenTextures(1, &fontTex[n]) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex[n]) );
+        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, FONT_CLAMP);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, FONT_CLAMP);
+        CHECK_GL_CALL( glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, fonts[n].tga.imageWidth, fonts[n].tga.imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, fonts[n].tga.imageData) );
+        //CHECK_GL_CALL( glGenerateMipmap(GL_TEXTURE_2D) );
+    }
 
     GLuint bgTexID;
     CHECK_GL_CALL( glGenTextures(1, &bgTexID) );
@@ -1019,10 +1200,10 @@ int main(int argc, char** argv)
     renderTarget phosphorLayer3;
 
     renderTarget_initScreen(&screen, screenW, screenH);
-    renderTarget_initFBO(&virtScreen, virtScreenW, virtScreenH);
-    renderTarget_initFBO(&phosphorLayer, phosphorLayerW, phosphorLayerH);
-    renderTarget_initFBO(&phosphorLayer2, phosphorLayerW/4, phosphorLayerH/4);
-    renderTarget_initFBO(&phosphorLayer3, phosphorLayerW/24, phosphorLayerH/24);
+    // renderTarget_initFBO(&virtScreen, virtScreenW, virtScreenH);
+    // renderTarget_initFBO(&phosphorLayer, phosphorLayerW, phosphorLayerH);
+    // renderTarget_initFBO(&phosphorLayer2, phosphorLayerW/4, phosphorLayerH/4);
+    // renderTarget_initFBO(&phosphorLayer3, phosphorLayerW/24, phosphorLayerH/24);
 
     screenGrid grid;
 
@@ -1065,11 +1246,11 @@ int main(int argc, char** argv)
 
         if(demo)
         {
-            updateCharsDemo(&charIndices[0][0], rows, cols);
+            updateCharsDemo(&charIndices[0][0], rows, cols, &activeFont);
         }
         else
         {
-            updateCharsFromUSB(&charIndices[0][0], rows, cols);
+            updateCharsFromUSB(&charIndices[0][0], rows, cols, &activeFont);
         }
 
         /////////
@@ -1093,10 +1274,6 @@ int main(int argc, char** argv)
         /////////
 
         const float flickerA = (frameIdx&1) ? 1.0f : 0.97f;
-
-        const float fontColorR = 0.4f;
-        const float fontColorG = 1.0f;
-        const float fontColorB = 0.4f;
 
         // if(glowLevel >= 1)
         // {
@@ -1151,11 +1328,11 @@ int main(int argc, char** argv)
         // {
         //     normalShader_select(&shNorm);
             
-        //     const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.93f; //0.73f;
-        //     const float sqX = (-scale*virtScreen.width)/screen.width;
-        //     const float sqY = (-scale*virtScreen.height)/screen.height-0.09;
-        //     const float sqW = (2*scale*virtScreen.width)/screen.width;
-        //     const float sqH = (2*scale*virtScreen.height)/screen.height*1.2;
+        //     const float scale = std::min( (float)screen.width/virtScreenW, (float)screen.height/virtScreenH) * 0.93f; //0.73f;
+        //     const float sqX = (-scale*virtScreenW)/screen.width;
+        //     const float sqY = (-scale*virtScreenH)/screen.height-0.09;
+        //     const float sqW = (2*scale*virtScreenW)/screen.width;
+        //     const float sqH = (2*scale*virtScreenH)/screen.height*1.2;
         //     //SetupGrid(vertexBuf, 20, 20, sqX, sqY, sqW, sqH, 0, 1, 1, -1);
         //     screenGrid_update(&grid, vertexBuf, sqX, sqY, sqW, sqH, 0, 0, 1, 1);
         //     CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
@@ -1168,19 +1345,22 @@ int main(int argc, char** argv)
 
         normalShader_select(&shNorm);
 
-            const float scale = std::min( (float)screen.width/virtScreen.width, (float)screen.height/virtScreen.height) * 0.9;
-            const float sqX = (-scale*virtScreen.width)/screen.width;
-            const float sqY = (-scale*virtScreen.height)/screen.height;
-            const float sqW = (2*scale*virtScreen.width)/screen.width;
-            const float sqH = (2*scale*virtScreen.height)/screen.height;
+            const float scale = std::min( (float)screen.width/virtScreenW, (float)screen.height/virtScreenH);
+            const float scaleX = scale * screenScaleX;
+            const float scaleY = scale * screenScaleY;
+            const float sqX = (-scaleX*virtScreenW)/screen.width;
+            const float sqY = (-scaleY*virtScreenH)/screen.height;
+            const float sqW = (2*scaleX*virtScreenW)/screen.width;
+            const float sqH = (2*scaleY*virtScreenH)/screen.height;
 
-        SetupString(vertexBuf, &font, &charIndices[0][0], cols, rows, sqX, sqY, sqW, sqH);
+        SetupString(vertexBuf, &fonts[activeFont], &charIndices[0][0], cols, rows, sqX, sqY, sqW, sqH);
 
-        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) );
+        //CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) ); // alpha
+        CHECK_GL_CALL( glBlendFunc(GL_SRC_ALPHA, GL_ONE) ); // additive
         CHECK_GL_CALL( glUniform4f(shNorm.texColor, fontColorR, fontColorG, fontColorB, 1.f) );
         CHECK_GL_CALL( glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertexBuf), vertexBuf) );
         CHECK_GL_CALL( glActiveTexture(GL_TEXTURE0) );
-        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex) );
+        CHECK_GL_CALL( glBindTexture(GL_TEXTURE_2D, fontTex[activeFont]) );
         CHECK_GL_CALL( glDrawElements(GL_TRIANGLES, 6*rows*cols, GL_UNSIGNED_SHORT, 0) );
 
         // {
