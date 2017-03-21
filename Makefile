@@ -54,6 +54,5 @@ runusb: $(APP_OUT)
 rundemo: $(APP_OUT)
 	$(RUN_CMD) --demo
 
-runboot:
-	fbset -xres 1920 -yres 1080
+run:
 	$(RUN_CMD)

@@ -7,7 +7,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-#define USB_TTY_PATH  "/dev/ttyUSB0" 
+#define USB_TTY_PATH  "/dev/ttyAMA0" 
 
 //----------------------------------------------------------------------------------------
  
@@ -32,7 +32,7 @@ static int open_serial_port(const char* path)
   // serialOpt.c_cflag = CS8 | CLOCAL | CREAD; // 8N1
   // //serialOpt.c_cc[VTIME] = 0; // timeout between characters in hundreds of ms
   // //serialOpt.c_cc[VMIN]  = 1; // block reading until 1 character received
-  // cfsetispeed (&serialOpt, 2000000);
+  // cfsetispeed (&serialOpt, 1500000);
  
   // tcflush(fd, TCIFLUSH);
  
